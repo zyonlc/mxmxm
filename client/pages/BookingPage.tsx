@@ -41,6 +41,7 @@ type HotelRoom = {
 
 type BookingOffer = { id: string; title: string; description: string; discount_percentage: number; minimum_nights: number; starts_at: string | null; ends_at: string | null };
 type BookingSettings = { title: string; subtitle: string };
+type RoomAvailability = { room_id: string; remaining_units: number };
 type SavedBookingAccess = { bookingId: string; accessToken: string; confirmationNumber: string };
 type ManagerBooking = { id: string; confirmation_number: string; room_id: string; check_in: string; check_out: string; guest_first_name: string; guest_last_name: string; guest_email: string; guest_count: number; booking_status: string; payment_status: string; total_amount: number; currency_code: string; books_accounting_status: string; books_accounting_error: string | null; hotel_rooms: { name: string } | null; hotel_payment_attempts: { status: string }[] };
 
@@ -58,6 +59,8 @@ const BookingPage = () => {
   const [recoveringBooking, setRecoveringBooking] = useState(false);
   const [checkIn, setCheckIn] = useState<Date>();
   const [checkOut, setCheckOut] = useState<Date>();
+  const [availability, setAvailability] = useState<{ dateKey: string; rooms: Record<string, number> } | null>(null);
+  const [availabilityErrorFor, setAvailabilityErrorFor] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [guests, setGuests] = useState("2");
   const [roomCount, setRoomCount] = useState("1");
@@ -76,6 +79,38 @@ const BookingPage = () => {
     setCheckIn(date);
     if (date && checkOut && date >= checkOut) setCheckOut(undefined);
   }, [checkOut]);
+
+  useEffect(() => {
+    if (!checkIn || !checkOut || checkOut <= checkIn) {
+      setAvailability(null);
+      setAvailabilityErrorFor(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setAvailability(null);
+    setAvailabilityErrorFor(null);
+    const checkInValue = format(checkIn, "yyyy-MM-dd");
+    const checkOutValue = format(checkOut, "yyyy-MM-dd");
+    const dateKey = `${checkInValue}/${checkOutValue}`;
+
+    void fetch("/api/hotel-availability", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ checkIn: checkInValue, checkOut: checkOutValue }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => null) as { availability?: RoomAvailability[]; error?: string } | null;
+      if (!response.ok || !payload || !Array.isArray(payload.availability)) throw new Error(payload?.error || "Availability could not be checked");
+      return payload.availability;
+    }).then((results) => {
+      if (!controller.signal.aborted) setAvailability({ dateKey, rooms: Object.fromEntries(results.map(({ room_id, remaining_units }) => [room_id, remaining_units])) });
+    }).catch(() => {
+      if (!controller.signal.aborted) setAvailabilityErrorFor(dateKey);
+    });
+
+    return () => controller.abort();
+  }, [checkIn, checkOut]);
 
   const loadPage = async () => {
     setLoading(true);
@@ -138,6 +173,11 @@ const BookingPage = () => {
   const publishedRooms = useMemo(() => rooms.filter((room) => room.status === "published"), [rooms]);
   const selectedRoom = publishedRooms.find((room) => room.id === selectedRoomId) || null;
   const totalNights = checkIn && checkOut ? Math.max(0, Math.round((Date.UTC(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate()) - Date.UTC(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate())) / 86400000)) : 0;
+  const currentDateKey = checkIn && checkOut ? `${format(checkIn, "yyyy-MM-dd")}/${format(checkOut, "yyyy-MM-dd")}` : null;
+  const currentAvailability = availability?.dateKey === currentDateKey ? availability.rooms : null;
+  const selectedRemainingUnits = selectedRoom && currentAvailability ? currentAvailability[selectedRoom.id] ?? 0 : null;
+  const selectedRoomUnavailable = selectedRemainingUnits !== null && selectedRemainingUnits < Number(roomCount);
+  const alternativeRooms = currentAvailability ? publishedRooms.filter((room) => room.id !== selectedRoomId && (currentAvailability[room.id] ?? 0) >= Number(roomCount)) : [];
   const roomSubtotal = selectedRoom ? Number(selectedRoom.nightly_rate) * totalNights * Number(roomCount) : 0;
   const applicableDiscount = Math.max(0, ...offers.filter((offer) => totalNights >= offer.minimum_nights).map((offer) => Number(offer.discount_percentage)));
   const stayDiscount = roomSubtotal * applicableDiscount / 100;
@@ -310,11 +350,14 @@ const BookingPage = () => {
             <Card>
               <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground">Choose your preferred room; availability is confirmed before the reservation is held.</p></CardHeader>
               <CardContent className="space-y-5">
+                {currentDateKey && !currentAvailability && availabilityErrorFor !== currentDateKey && <p className="text-xs text-muted-foreground" role="status">Checking room availability in the background…</p>}
+                {currentDateKey && availabilityErrorFor === currentDateKey && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="status">Availability couldn’t be refreshed. You can continue, and the hotel will confirm inventory before holding your room.</p>}
+                {selectedRoomUnavailable && <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm" role="alert"><p className="font-medium text-destructive">{selectedRoom.name} is no longer available for these dates with the selected room count.</p>{alternativeRooms.length > 0 ? <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-muted-foreground">Available alternatives:</span>{alternativeRooms.map((room) => <Button key={room.id} type="button" variant="outline" size="sm" onClick={() => setSelectedRoomId(room.id)}>{room.name}</Button>)}</div> : <p className="mt-2 text-muted-foreground">Try different dates or reduce the number of rooms.</p>}</div>}
                 {loading ? <div className="space-y-3" aria-busy="true"><div className="h-40 animate-pulse rounded-xl bg-muted" /><div className="h-40 animate-pulse rounded-xl bg-muted" /></div> : publishedRooms.length ? publishedRooms.map((room) => (
                   <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => setSelectedRoomId(room.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedRoomId(room.id); }} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-colors hover:border-sheraton-gold/50", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
                     <div className="grid sm:grid-cols-[200px_1fr]">
                       <div className="relative min-h-40 bg-gradient-to-br from-sheraton-cream to-sheraton-gold/20">{room.image_url ? <img src={room.image_url} alt={room.name} className="h-full min-h-40 w-full object-cover" /> : <div className="flex h-full min-h-40 items-center justify-center"><Hotel className="h-12 w-12 text-sheraton-gold/70" /></div>}</div>
-                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{room.size_sqm && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => <span key={amenity} className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{amenity}</span>)}</div></div>
+                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}{currentAvailability && <Badge variant={currentAvailability[room.id] >= Number(roomCount) ? "outline" : "destructive"}>{currentAvailability[room.id] >= Number(roomCount) ? "Available" : "Unavailable"}</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{room.size_sqm && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => <span key={amenity} className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{amenity}</span>)}</div></div>
                     </div>
                   </article>
                 )) : <div className="rounded-xl border border-dashed p-8 text-center"><Hotel className="mx-auto mb-3 h-9 w-9 text-muted-foreground" /><h3 className="font-semibold">No rooms are available yet</h3><p className="mt-1 text-sm text-muted-foreground">Published room listings will appear here as soon as the hotel adds them.</p></div>}
@@ -329,7 +372,7 @@ const BookingPage = () => {
               <CardHeader><CardTitle className="flex items-center gap-2"><Gift className="h-5 w-5 text-sheraton-gold" />Booking summary</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 {selectedRoom ? <><div className="rounded-lg bg-sheraton-gold/10 p-3"><p className="font-semibold text-sheraton-navy">{selectedRoom.name}</p><p className="mt-1 text-sm text-muted-foreground">{guests} guests · {roomCount} {Number(roomCount) === 1 ? "room" : "rooms"}</p></div><div className="space-y-2 text-sm">{checkIn && <div className="flex justify-between"><span>Check-in</span><span>{format(checkIn, "MMM d, yyyy")}</span></div>}{checkOut && <div className="flex justify-between"><span>Check-out</span><span>{format(checkOut, "MMM d, yyyy")}</span></div>}{totalNights > 0 && <div className="flex justify-between"><span>Length of stay</span><span>{totalNights} {totalNights === 1 ? "night" : "nights"}</span></div>}<Separator /><div className="flex justify-between"><span>Room rate</span><span>{money(roomSubtotal, selectedRoom.currency_code.trim())}</span></div>{stayDiscount > 0 && <div className="flex justify-between text-green-700"><span>Extended-stay savings</span><span>−{money(stayDiscount, selectedRoom.currency_code.trim())}</span></div>}<div className="flex justify-between font-semibold"><span>Room subtotal</span><span>{money(roomSubtotal - stayDiscount, selectedRoom.currency_code.trim())}</span></div><p className="text-xs leading-5 text-muted-foreground">18% Uganda VAT and Local Hotel Tax are calculated securely at checkout using the hotel classification and nightly room rate. Applicable stay offers are loaded from the database; final taxes and amount due are confirmed before payment.</p></div></> : <div className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">Choose a room and stay dates to see your estimate.</div>}
-                <Button className="w-full sheraton-gradient text-white" size="lg" disabled={!selectedRoom || !checkIn || !checkOut || totalNights <= 0 || Number(guests) > selectedRoom.max_guests * Number(roomCount)} onClick={() => setCheckoutOpen(true)}><CalendarDays className="mr-2 h-4 w-4" />Continue to guest details</Button>
+                <Button className="w-full sheraton-gradient text-white" size="lg" disabled={!selectedRoom || !checkIn || !checkOut || totalNights <= 0 || Number(guests) > selectedRoom.max_guests * Number(roomCount) || selectedRoomUnavailable} onClick={() => setCheckoutOpen(true)}><CalendarDays className="mr-2 h-4 w-4" />Continue to guest details</Button>
                 {selectedRoom && Number(guests) > selectedRoom.max_guests * Number(roomCount) && <p className="text-xs text-destructive">The selected room inventory cannot accommodate this number of guests.</p>}
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground"><CheckCircle className="h-3.5 w-3.5 text-green-600" />Secure checkout · Payment via Flutterwave</div>
               </CardContent>
