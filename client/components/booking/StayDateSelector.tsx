@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { useIsMobile } from "../../hooks/use-mobile";
 import { cn } from "../../lib/utils";
 
 type StayDateSelectorProps = {
@@ -42,7 +41,6 @@ const StayDateSelector = memo(function StayDateSelector({
 }: StayDateSelectorProps) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"check-in" | "check-out">("check-in");
-  const isMobile = useIsMobile();
   const modifiers = useMemo(() => ({
     stayStart: checkIn,
     stayEnd: checkOut,
@@ -122,7 +120,7 @@ const StayDateSelector = memo(function StayDateSelector({
             onSelect={handleDateSelect}
             disabled={{ before: step === "check-in" ? today : addDays(checkIn || today, 1) }}
             defaultMonth={checkIn || today}
-            numberOfMonths={isMobile ? 1 : 2}
+            numberOfMonths={1}
             modifiers={modifiers}
             modifiersClassNames={rangeClasses}
             className="p-2 sm:p-4"

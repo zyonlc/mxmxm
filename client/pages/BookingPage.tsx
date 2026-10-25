@@ -68,9 +68,6 @@ const BookingPage = () => {
   const [managerUserId, setManagerUserId] = useState<string | null>(null);
   const [managerOrganizationId, setManagerOrganizationId] = useState<string | null>(null);
   const [hotelClassification, setHotelClassification] = useState<number | null>(null);
-  const [roomAvailability, setRoomAvailability] = useState<Record<string, number> | null>(null);
-  const [availabilityLoading, setAvailabilityLoading] = useState(false);
-  const [availabilityError, setAvailabilityError] = useState(false);
   const [roomFormOpen, setRoomFormOpen] = useState(false);
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [savingRoom, setSavingRoom] = useState(false);
@@ -137,42 +134,6 @@ const BookingPage = () => {
       localStorage.removeItem("hotel-booking-access");
     }
   }, []);
-
-  useEffect(() => {
-    if (!checkIn || !checkOut || checkOut <= checkIn) {
-      setRoomAvailability(null);
-      setAvailabilityLoading(false);
-      setAvailabilityError(false);
-      return;
-    }
-    let active = true;
-    setRoomAvailability(null);
-    setAvailabilityLoading(true);
-    setAvailabilityError(false);
-    const loadAvailability = async () => {
-      try {
-        const availabilityResponse = await fetch("/api/hotel-availability", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ checkIn: format(checkIn, "yyyy-MM-dd"), checkOut: format(checkOut, "yyyy-MM-dd") }),
-          cache: "no-store",
-        });
-        const payload = await availabilityResponse.json().catch(() => null) as { availability?: Array<{ room_id: string; remaining_units: number }> } | null;
-        if (!active) return;
-        if (!availabilityResponse.ok || !payload?.availability) {
-          setAvailabilityError(true);
-          return;
-        }
-        setRoomAvailability(Object.fromEntries(payload.availability.map((row) => [row.room_id, Number(row.remaining_units)])));
-      } catch {
-        if (active) setAvailabilityError(true);
-      } finally {
-        if (active) setAvailabilityLoading(false);
-      }
-    };
-    void loadAvailability();
-    return () => { active = false; };
-  }, [checkIn, checkOut]);
 
   const publishedRooms = useMemo(() => rooms.filter((room) => room.status === "published"), [rooms]);
   const selectedRoom = publishedRooms.find((room) => room.id === selectedRoomId) || null;
@@ -347,13 +308,13 @@ const BookingPage = () => {
             <StayDateSelector checkIn={checkIn} checkOut={checkOut} totalNights={totalNights} onCheckInChange={updateCheckIn} onCheckOutChange={setCheckOut} guests={guests} onGuestsChange={setGuests} roomCount={roomCount} onRoomCountChange={setRoomCount} />
 
             <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground" aria-live="polite">{availabilityLoading ? "Checking room availability for your dates…" : availabilityError ? "Availability could not be checked. You can still continue and confirm at checkout." : "Rates and room availability are provided by the property."}</p></CardHeader>
+              <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground">Choose your preferred room; availability is confirmed before the reservation is held.</p></CardHeader>
               <CardContent className="space-y-5">
                 {loading ? <div className="space-y-3" aria-busy="true"><div className="h-40 animate-pulse rounded-xl bg-muted" /><div className="h-40 animate-pulse rounded-xl bg-muted" /></div> : publishedRooms.length ? publishedRooms.map((room) => (
-                  <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => { if (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0) setSelectedRoomId(room.id); }} onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0)) setSelectedRoomId(room.id); }} aria-disabled={Boolean(checkIn && checkOut && roomAvailability?.[room.id] === 0)} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-colors hover:border-sheraton-gold/50", checkIn && checkOut && roomAvailability?.[room.id] === 0 && "cursor-not-allowed opacity-60", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
+                  <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => setSelectedRoomId(room.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedRoomId(room.id); }} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-colors hover:border-sheraton-gold/50", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
                     <div className="grid sm:grid-cols-[200px_1fr]">
                       <div className="relative min-h-40 bg-gradient-to-br from-sheraton-cream to-sheraton-gold/20">{room.image_url ? <img src={room.image_url} alt={room.name} className="h-full min-h-40 w-full object-cover" /> : <div className="flex h-full min-h-40 items-center justify-center"><Hotel className="h-12 w-12 text-sheraton-gold/70" /></div>}</div>
-                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{checkIn && checkOut && roomAvailability && <Badge variant={roomAvailability[room.id] > 0 ? "outline" : "destructive"}>{roomAvailability[room.id] > 0 ? `${roomAvailability[room.id]} available for your dates` : "Sold out for these dates"}</Badge>}{availabilityError && checkIn && checkOut && <span className="text-xs text-muted-foreground">Availability confirmed at checkout</span>}{checkIn && checkOut && roomAvailability && <Badge variant={roomAvailability[room.id] > 0 ? "outline" : "destructive"}>{roomAvailability[room.id] > 0 ? `${roomAvailability[room.id]} available for your dates` : "Sold out for these dates"}</Badge>}{availabilityError && checkIn && checkOut && <span className="text-xs text-muted-foreground">Availability confirmed at checkout</span>}{room.size_sqm && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => <span key={amenity} className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{amenity}</span>)}</div></div>
+                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{room.size_sqm && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => <span key={amenity} className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{amenity}</span>)}</div></div>
                     </div>
                   </article>
                 )) : <div className="rounded-xl border border-dashed p-8 text-center"><Hotel className="mx-auto mb-3 h-9 w-9 text-muted-foreground" /><h3 className="font-semibold">No rooms are available yet</h3><p className="mt-1 text-sm text-muted-foreground">Published room listings will appear here as soon as the hotel adds them.</p></div>}
@@ -368,8 +329,8 @@ const BookingPage = () => {
               <CardHeader><CardTitle className="flex items-center gap-2"><Gift className="h-5 w-5 text-sheraton-gold" />Booking summary</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 {selectedRoom ? <><div className="rounded-lg bg-sheraton-gold/10 p-3"><p className="font-semibold text-sheraton-navy">{selectedRoom.name}</p><p className="mt-1 text-sm text-muted-foreground">{guests} guests · {roomCount} {Number(roomCount) === 1 ? "room" : "rooms"}</p></div><div className="space-y-2 text-sm">{checkIn && <div className="flex justify-between"><span>Check-in</span><span>{format(checkIn, "MMM d, yyyy")}</span></div>}{checkOut && <div className="flex justify-between"><span>Check-out</span><span>{format(checkOut, "MMM d, yyyy")}</span></div>}{totalNights > 0 && <div className="flex justify-between"><span>Length of stay</span><span>{totalNights} {totalNights === 1 ? "night" : "nights"}</span></div>}<Separator /><div className="flex justify-between"><span>Room rate</span><span>{money(roomSubtotal, selectedRoom.currency_code.trim())}</span></div>{stayDiscount > 0 && <div className="flex justify-between text-green-700"><span>Extended-stay savings</span><span>−{money(stayDiscount, selectedRoom.currency_code.trim())}</span></div>}<div className="flex justify-between font-semibold"><span>Room subtotal</span><span>{money(roomSubtotal - stayDiscount, selectedRoom.currency_code.trim())}</span></div><p className="text-xs leading-5 text-muted-foreground">18% Uganda VAT and Local Hotel Tax are calculated securely at checkout using the hotel classification and nightly room rate. Applicable stay offers are loaded from the database; final taxes and amount due are confirmed before payment.</p></div></> : <div className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">Choose a room and stay dates to see your estimate.</div>}
-                <Button className="w-full sheraton-gradient text-white" size="lg" disabled={!selectedRoom || !checkIn || !checkOut || totalNights <= 0 || Number(guests) > selectedRoom.max_guests * Number(roomCount) || Boolean(checkIn && checkOut && roomAvailability && (roomAvailability[selectedRoom?.id || ""] ?? 0) < Number(roomCount))} onClick={() => setCheckoutOpen(true)}><CalendarDays className="mr-2 h-4 w-4" />Continue to guest details</Button>
-                {selectedRoom && Number(guests) > selectedRoom.max_guests * Number(roomCount) && <p className="text-xs text-destructive">The selected room inventory cannot accommodate this number of guests.</p>}{selectedRoom && checkIn && checkOut && roomAvailability && (roomAvailability[selectedRoom.id] ?? 0) < Number(roomCount) && <p className="text-xs text-destructive">Only {roomAvailability[selectedRoom.id] ?? 0} room(s) are available for those dates.</p>}
+                <Button className="w-full sheraton-gradient text-white" size="lg" disabled={!selectedRoom || !checkIn || !checkOut || totalNights <= 0 || Number(guests) > selectedRoom.max_guests * Number(roomCount)} onClick={() => setCheckoutOpen(true)}><CalendarDays className="mr-2 h-4 w-4" />Continue to guest details</Button>
+                {selectedRoom && Number(guests) > selectedRoom.max_guests * Number(roomCount) && <p className="text-xs text-destructive">The selected room inventory cannot accommodate this number of guests.</p>}
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground"><CheckCircle className="h-3.5 w-3.5 text-green-600" />Secure checkout · Payment via Flutterwave</div>
               </CardContent>
             </Card>
