@@ -8,7 +8,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { cn } from "../../lib/utils";
-import { useIsMobile } from "../../hooks/use-mobile";
 
 type StayDateSelectorProps = {
   checkIn?: Date;
@@ -40,7 +39,6 @@ const StayDateSelector = memo(function StayDateSelector({
   roomCount,
   onRoomCountChange,
 }: StayDateSelectorProps) {
-  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"check-in" | "check-out">("check-in");
   const modifiers = useMemo(() => ({
@@ -102,7 +100,7 @@ const StayDateSelector = memo(function StayDateSelector({
           </div>
         </CardContent>
       </Card>
-      <DialogContent overlayClassName="data-[state=open]:animate-none data-[state=closed]:animate-none" className="left-0 top-auto bottom-0 max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl p-4 data-[state=open]:animate-none data-[state=closed]:animate-none sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:w-fit sm:max-w-[calc(100vw_-_2rem)] lg:max-w-[46rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6">
+      <DialogContent overlayClassName="data-[state=open]:animate-none data-[state=closed]:animate-none" className="left-0 top-auto bottom-0 max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl p-4 data-[state=open]:animate-none data-[state=closed]:animate-none sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:w-fit sm:max-w-[calc(100vw_-_2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6">
         <DialogHeader className="pr-8 text-left">
           <DialogTitle className="text-xl">Choose your stay dates</DialogTitle>
           <DialogDescription>{step === "check-in" ? "Start by choosing the day you’ll arrive." : "Now choose the day you’ll check out."}</DialogDescription>
@@ -122,7 +120,7 @@ const StayDateSelector = memo(function StayDateSelector({
             onSelect={handleDateSelect}
             disabled={{ before: step === "check-in" ? today : addDays(checkIn || today, 1) }}
             defaultMonth={checkIn || today}
-            numberOfMonths={isMobile ? 1 : 2}
+            numberOfMonths={1}
             modifiers={modifiers}
             modifiersClassNames={rangeClasses}
             className="p-2 sm:p-3"
