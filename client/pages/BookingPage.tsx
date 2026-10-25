@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { format } from "date-fns";
+import { addDays, format, startOfToday } from "date-fns";
 import { supabase } from "../lib/supabase";
 import BookingCheckoutModal from "../components/booking/BookingCheckoutModal";
 import { Button } from "../components/ui/button";
@@ -10,9 +10,12 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Checkbox } from "../components/ui/checkbox";
+import { Calendar } from "../components/ui/calendar";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
 import { useToast } from "../hooks/use-toast";
+import { useIsMobile } from "../hooks/use-mobile";
 import { Bed, CalendarDays, Check, CheckCircle, Crown, Gift, Hotel, MapPin, Plus, Users, Wifi } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useRewardsPoints } from "../lib/rewardsPointsContext";
@@ -44,7 +47,7 @@ type SavedBookingAccess = { bookingId: string; accessToken: string; confirmation
 type ManagerBooking = { id: string; confirmation_number: string; room_id: string; check_in: string; check_out: string; guest_first_name: string; guest_last_name: string; guest_email: string; guest_count: number; booking_status: string; payment_status: string; total_amount: number; currency_code: string; books_accounting_status: string; books_accounting_error: string | null; hotel_rooms: { name: string } | null; hotel_payment_attempts: { status: string }[] };
 
 const currencies = ["USD", "UGX", "EUR", "GBP", "KES", "TZS", "RWF"];
-const today = new Date();
+const today = startOfToday();
 const money = (value: number, currency: string) => new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value || 0);
 
 const BookingPage = () => {
@@ -58,6 +61,9 @@ const BookingPage = () => {
   const [recoveringBooking, setRecoveringBooking] = useState(false);
   const [checkIn, setCheckIn] = useState<Date>();
   const [checkOut, setCheckOut] = useState<Date>();
+  const [stayDatePickerOpen, setStayDatePickerOpen] = useState(false);
+  const [stayDateStep, setStayDateStep] = useState<"check-in" | "check-out">("check-in");
+  const isMobile = useIsMobile();
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [guests, setGuests] = useState("2");
   const [roomCount, setRoomCount] = useState("1");
@@ -160,6 +166,17 @@ const BookingPage = () => {
     void loadAvailability();
     return () => { active = false; };
   }, [checkIn, checkOut]);
+
+  const handleStayDateSelect = (date?: Date) => {
+    if (!date) return;
+    if (stayDateStep === "check-in") {
+      setCheckIn(date);
+      if (checkOut && date >= checkOut) setCheckOut(undefined);
+      setStayDateStep("check-out");
+      return;
+    }
+    setCheckOut(date);
+  };
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId && room.status === "published") || null;
   const totalNights = checkIn && checkOut ? Math.max(0, Math.round((Date.UTC(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate()) - Date.UTC(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate())) / 86400000)) : 0;
@@ -330,15 +347,85 @@ const BookingPage = () => {
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
           <main className="space-y-8">
-            <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-sheraton-gold" />When would you like to stay?</CardTitle></CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-2"><Label htmlFor="booking-check-in">Check-in</Label><Input id="booking-check-in" type="date" min={format(today, "yyyy-MM-dd")} value={checkIn ? format(checkIn, "yyyy-MM-dd") : ""} onChange={(event) => { const value = event.target.value; const date = value ? new Date(`${value}T00:00:00`) : undefined; setCheckIn(date); if (date && checkOut && date >= checkOut) setCheckOut(undefined); }} /></div>
-                <div className="space-y-2"><Label htmlFor="booking-check-out">Check-out</Label><Input id="booking-check-out" type="date" min={format(checkIn || today, "yyyy-MM-dd")} value={checkOut ? format(checkOut, "yyyy-MM-dd") : ""} onChange={(event) => { const value = event.target.value; const minDate = format(checkIn || today, "yyyy-MM-dd"); if (value && value < minDate) return; setCheckOut(value ? new Date(`${value}T00:00:00`) : undefined); }} /></div>
-                <div className="space-y-2"><Label>Guests</Label><Select value={guests} onValueChange={setGuests}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 20 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "guest" : "guests"}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-2"><Label>Rooms</Label><Select value={roomCount} onValueChange={setRoomCount}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 10 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "room" : "rooms"}</SelectItem>)}</SelectContent></Select></div>
-              </CardContent>
-            </Card>
+            <Dialog open={stayDatePickerOpen} onOpenChange={setStayDatePickerOpen}>
+              <Card className="overflow-hidden border-border/70 shadow-sm">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-sheraton-gold" />When would you like to stay?</CardTitle>
+                  <p className="text-sm text-muted-foreground">Choose your dates, guests, and rooms to see what’s available.</p>
+                </CardHeader>
+                <CardContent className="grid gap-3 pt-0 sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <DialogTrigger asChild>
+                      <Button type="button" id="booking-check-in" variant="outline" aria-label={`Choose check-in date${checkIn ? `, ${format(checkIn, "PPP")}` : ""}`} onClick={() => setStayDateStep("check-in")} className="h-[72px] w-full justify-start rounded-xl px-4 text-left font-normal hover:border-sheraton-gold/60 hover:bg-sheraton-gold/5">
+                        <CalendarDays className="mr-3 h-5 w-5 shrink-0 text-sheraton-gold" />
+                        <span className="min-w-0 flex-1"><span className="block text-xs text-muted-foreground">Check-in</span><span className="block truncate text-sm font-semibold text-foreground">{checkIn ? format(checkIn, "MMM d, yyyy") : "Select date"}</span></span>
+                      </Button>
+                    </DialogTrigger>
+                  </div>
+                  <div>
+                    <DialogTrigger asChild>
+                      <Button type="button" id="booking-check-out" variant="outline" aria-label={`Choose check-out date${checkOut ? `, ${format(checkOut, "PPP")}` : ""}`} onClick={() => setStayDateStep(checkIn ? "check-out" : "check-in")} className="h-[72px] w-full justify-start rounded-xl px-4 text-left font-normal hover:border-sheraton-gold/60 hover:bg-sheraton-gold/5">
+                        <CalendarDays className="mr-3 h-5 w-5 shrink-0 text-sheraton-gold" />
+                        <span className="min-w-0 flex-1"><span className="block text-xs text-muted-foreground">Check-out</span><span className="block truncate text-sm font-semibold text-foreground">{checkOut ? format(checkOut, "MMM d, yyyy") : "Select date"}</span></span>
+                      </Button>
+                    </DialogTrigger>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="booking-guests">Guests</Label>
+                    <Select value={guests} onValueChange={setGuests}>
+                      <SelectTrigger id="booking-guests" className="h-[72px] rounded-xl px-4"><span className="flex items-center gap-3"><Users className="h-5 w-5 text-sheraton-gold" /><SelectValue /></span></SelectTrigger>
+                      <SelectContent>{Array.from({ length: 20 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "guest" : "guests"}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="booking-rooms">Rooms</Label>
+                    <Select value={roomCount} onValueChange={setRoomCount}>
+                      <SelectTrigger id="booking-rooms" className="h-[72px] rounded-xl px-4"><span className="flex items-center gap-3"><Bed className="h-5 w-5 text-sheraton-gold" /><SelectValue /></span></SelectTrigger>
+                      <SelectContent>{Array.from({ length: 10 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "room" : "rooms"}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                </CardContent>
+              </Card>
+              <DialogContent className="left-0 top-auto bottom-0 max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl p-5 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:max-w-[760px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6">
+                <DialogHeader className="pr-8 text-left">
+                  <DialogTitle className="text-xl">Choose your stay dates</DialogTitle>
+                  <DialogDescription>{stayDateStep === "check-in" ? "Start by choosing the day you’ll arrive." : "Now choose the day you’ll check out."}</DialogDescription>
+                </DialogHeader>
+                <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/60 p-1">
+                  <Button type="button" variant={stayDateStep === "check-in" ? "default" : "ghost"} onClick={() => setStayDateStep("check-in")} className={cn("h-auto min-h-14 flex-col items-start rounded-lg px-3 py-2 text-left", stayDateStep === "check-in" && "bg-sheraton-navy text-white hover:bg-sheraton-navy")}>
+                    <span className="text-xs opacity-75">Check-in</span><span className="text-sm font-semibold">{checkIn ? format(checkIn, "EEE, MMM d") : "Select date"}</span>
+                  </Button>
+                  <Button type="button" variant={stayDateStep === "check-out" ? "default" : "ghost"} onClick={() => setStayDateStep("check-out")} className={cn("h-auto min-h-14 flex-col items-start rounded-lg px-3 py-2 text-left", stayDateStep === "check-out" && "bg-sheraton-navy text-white hover:bg-sheraton-navy")}>
+                    <span className="text-xs opacity-75">Check-out</span><span className="text-sm font-semibold">{checkOut ? format(checkOut, "EEE, MMM d") : "Select date"}</span>
+                  </Button>
+                </div>
+                <div className="flex justify-center rounded-xl border bg-card py-2 sm:py-3">
+                  <Calendar
+                    mode="single"
+                    selected={stayDateStep === "check-in" ? checkIn : checkOut}
+                    onSelect={handleStayDateSelect}
+                    disabled={{ before: stayDateStep === "check-in" ? today : addDays(checkIn || today, 1) }}
+                    defaultMonth={stayDateStep === "check-out" && checkIn ? checkIn : checkIn || today}
+                    numberOfMonths={isMobile ? 1 : 2}
+                    modifiers={{
+                      stayStart: checkIn,
+                      stayEnd: checkOut,
+                      stayMiddle: (date) => Boolean(checkIn && checkOut && date > checkIn && date < checkOut),
+                    }}
+                    modifiersClassNames={{
+                      stayStart: "rounded-l-full bg-sheraton-gold/20",
+                      stayMiddle: "rounded-none bg-sheraton-gold/20",
+                      stayEnd: "rounded-r-full bg-sheraton-gold/20",
+                    }}
+                    className="p-2 sm:p-4"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4 border-t pt-4">
+                  <p className="text-sm text-muted-foreground">{checkIn && checkOut ? `${totalNights} ${totalNights === 1 ? "night" : "nights"} selected` : "Select a check-in and check-out date"}</p>
+                  <Button type="button" variant="outline" disabled={!checkIn || !checkOut} onClick={() => setStayDatePickerOpen(false)}>Done</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             <Card>
               <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground">Rates and room availability are provided by the property.</p></CardHeader>
