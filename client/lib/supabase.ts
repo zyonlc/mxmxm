@@ -41,6 +41,16 @@ export interface Attachment {
   updated_at: string
 }
 
+export interface FileAttachment {
+  attachmentId: string
+  publicUrl: string
+  filename: string
+  originalName: string
+  fileSize: number
+  mimeType: string
+  fileType: Attachment["file_type"]
+}
+
 export interface Complaint {
   id: string
   user_id: string | null
@@ -111,6 +121,9 @@ export interface TaskProposal {
   quoted_price: number | null
   proposal_notes: string | null
   proposed_timeline: string | null
+  proposed_category: string | null
+  proposed_estimated_time: string | null
+  proposed_payment_terms: string | null
   attachments: Array<{id: string; name: string; size: number}> | null
   created_at: string
   updated_at: string
@@ -217,6 +230,7 @@ export interface TaskEvidenceSubmission {
   provider_id: string
   evidence_type: 'photo' | 'video' | 'document' | 'signature'
   attachment_id: string
+  attachments?: Pick<Attachment, "b2_url" | "file_type" | "original_name" | "file_size"> | null
   description: string | null
   submitted_at: string
   approved_at: string | null

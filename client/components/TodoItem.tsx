@@ -90,7 +90,7 @@ export const TodoItem: React.FC<TodoItemProps> = ({
     }
   };
 
-  const handleStatusChange = async (newStatus: string) => {
+  const handleStatusChange = async (newStatus: TodoListItem["status"]) => {
     setIsUpdating(true);
     try {
       const updateData: Record<string, any> = {
@@ -266,7 +266,9 @@ export const TodoItem: React.FC<TodoItemProps> = ({
           </p>
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Select value={status} onValueChange={handleStatusChange} disabled={isUpdating || status === "completed"}>
+              <Select value={status} onValueChange={(value) => {
+                if (value === "pending" || value === "in_progress" || value === "completed") void handleStatusChange(value);
+              }} disabled={isUpdating || status === "completed"}>
                 <SelectTrigger className="flex-1">
                   <SelectValue />
                 </SelectTrigger>

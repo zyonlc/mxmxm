@@ -144,8 +144,8 @@ describe("prepareFlutterwaveHostedSession", () => {
       last_name: "Guest",
       phone: "+256700000000",
     };
-    const staleTxRef = "sheraton-SH0123456789AB-first-ref";
-    const currentTxRef = "sheraton-SH0123456789AB-second-ref";
+    const staleTxRef = "sheraton-SH0123456789AB-00000000-0000-4000-8000-000000000001";
+    const currentTxRef = "sheraton-SH0123456789AB-00000000-0000-4000-8000-000000000002";
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes(`/rest/v1/menu_orders?id=eq.${orderId}`)) return jsonResponse([currentOrder]);
@@ -177,9 +177,9 @@ describe("prepareFlutterwaveHostedSession", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce("first-ref").mockReturnValueOnce("second-ref");
+    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce("00000000-0000-4000-8000-000000000001").mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
 
-    const result = await prepareFlutterwaveHostedSession({ orderId }, "Bearer user-token", organizationId, "hotel.example.test");
+    const result = await prepareFlutterwaveHostedSession({ orderId }, organizationId, "hotel.example.test", "Bearer user-token");
 
     expect(result).toEqual({ paymentUrl: "https://checkout.flutterwave.com/current", txRef: currentTxRef, orderId });
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/rpc/create_menu_payment_attempt"))).toHaveLength(2);

@@ -390,8 +390,6 @@ const StaffPortalPage = () => {
       assignTo: "",
       checklist: ["", "", ""],
     });
-    setNewTaskChecklist(["", "", ""]);
-    setShowCreateTask(false);
 
     // Show success message
     alert("Task created and allocated successfully!");
