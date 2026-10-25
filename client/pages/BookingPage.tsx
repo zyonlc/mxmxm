@@ -14,7 +14,7 @@ import StayDateSelector from "../components/booking/StayDateSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
 import { useToast } from "../hooks/use-toast";
-import { Bed, CalendarDays, Check, CheckCircle, Crown, Gift, Hotel, MapPin, Plus, Users, Wifi } from "lucide-react";
+import { Bed, BedDouble, BriefcaseBusiness, Building2, CalendarDays, Check, CheckCircle, Crown, Gift, Hotel, Plus, Ruler, Users, Wifi, Wine } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useRewardsPoints } from "../lib/rewardsPointsContext";
 
@@ -47,6 +47,14 @@ type ManagerBooking = { id: string; confirmation_number: string; room_id: string
 
 const currencies = ["USD", "UGX", "EUR", "GBP", "KES", "TZS", "RWF"];
 const money = (value: number, currency: string) => new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value || 0);
+const getAmenityIcon = (amenity: string) => {
+  const value = amenity.toLowerCase();
+  if (value.includes("bed")) return BedDouble;
+  if (value.includes("view")) return Building2;
+  if (value.includes("bar")) return Wine;
+  if (value.includes("desk")) return BriefcaseBusiness;
+  return Wifi;
+};
 
 const BookingPage = () => {
   const { toast } = useToast();
@@ -357,7 +365,7 @@ const BookingPage = () => {
                   <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => setSelectedRoomId(room.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedRoomId(room.id); }} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-colors hover:border-sheraton-gold/50", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
                     <div className="grid sm:grid-cols-[200px_1fr]">
                       <div className="relative min-h-40 bg-gradient-to-br from-sheraton-cream to-sheraton-gold/20">{room.image_url ? <img src={room.image_url} alt={room.name} className="h-full min-h-40 w-full object-cover" /> : <div className="flex h-full min-h-40 items-center justify-center"><Hotel className="h-12 w-12 text-sheraton-gold/70" /></div>}</div>
-                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}{currentAvailability && <Badge variant={currentAvailability[room.id] >= Number(roomCount) ? "outline" : "destructive"}>{currentAvailability[room.id] >= Number(roomCount) ? "Available" : "Unavailable"}</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{room.size_sqm && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => <span key={amenity} className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{amenity}</span>)}</div></div>
+                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}{currentAvailability && <Badge variant={currentAvailability[room.id] >= Number(roomCount) ? "outline" : "destructive"}>{currentAvailability[room.id] >= Number(roomCount) ? "Available" : "Unavailable"}</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{room.size_sqm && <span className="inline-flex items-center gap-1"><Ruler className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => { const AmenityIcon = getAmenityIcon(amenity); return <span key={amenity} className="inline-flex items-center gap-1"><AmenityIcon className="h-3.5 w-3.5" />{amenity}</span>; })}</div></div>
                     </div>
                   </article>
                 )) : <div className="rounded-xl border border-dashed p-8 text-center"><Hotel className="mx-auto mb-3 h-9 w-9 text-muted-foreground" /><h3 className="font-semibold">No rooms are available yet</h3><p className="mt-1 text-sm text-muted-foreground">Published room listings will appear here as soon as the hotel adds them.</p></div>}
