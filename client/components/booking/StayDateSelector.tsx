@@ -102,7 +102,7 @@ const StayDateSelector = memo(function StayDateSelector({
           </div>
         </CardContent>
       </Card>
-      <DialogContent className="left-0 top-auto bottom-0 max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl p-5 data-[state=open]:animate-none data-[state=closed]:animate-none sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:max-w-[760px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6">
+      <DialogContent overlayClassName="data-[state=open]:animate-none data-[state=closed]:animate-none" className="left-0 top-auto bottom-0 max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl p-5 data-[state=open]:animate-none data-[state=closed]:animate-none sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:max-w-[760px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6">
         <DialogHeader className="pr-8 text-left">
           <DialogTitle className="text-xl">Choose your stay dates</DialogTitle>
           <DialogDescription>{step === "check-in" ? "Start by choosing the day you’ll arrive." : "Now choose the day you’ll check out."}</DialogDescription>
