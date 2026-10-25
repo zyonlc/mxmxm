@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { addDays, format, startOfToday } from "date-fns";
+import { format } from "date-fns";
 import { supabase } from "../lib/supabase";
 import BookingCheckoutModal from "../components/booking/BookingCheckoutModal";
 import { Button } from "../components/ui/button";
@@ -10,12 +10,10 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Checkbox } from "../components/ui/checkbox";
-import { Calendar } from "../components/ui/calendar";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
+import StayDateSelector from "../components/booking/StayDateSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
 import { useToast } from "../hooks/use-toast";
-import { useIsMobile } from "../hooks/use-mobile";
 import { Bed, CalendarDays, Check, CheckCircle, Crown, Gift, Hotel, MapPin, Plus, Users, Wifi } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useRewardsPoints } from "../lib/rewardsPointsContext";
@@ -47,7 +45,6 @@ type SavedBookingAccess = { bookingId: string; accessToken: string; confirmation
 type ManagerBooking = { id: string; confirmation_number: string; room_id: string; check_in: string; check_out: string; guest_first_name: string; guest_last_name: string; guest_email: string; guest_count: number; booking_status: string; payment_status: string; total_amount: number; currency_code: string; books_accounting_status: string; books_accounting_error: string | null; hotel_rooms: { name: string } | null; hotel_payment_attempts: { status: string }[] };
 
 const currencies = ["USD", "UGX", "EUR", "GBP", "KES", "TZS", "RWF"];
-const today = startOfToday();
 const money = (value: number, currency: string) => new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value || 0);
 
 const BookingPage = () => {
@@ -61,9 +58,6 @@ const BookingPage = () => {
   const [recoveringBooking, setRecoveringBooking] = useState(false);
   const [checkIn, setCheckIn] = useState<Date>();
   const [checkOut, setCheckOut] = useState<Date>();
-  const [stayDatePickerOpen, setStayDatePickerOpen] = useState(false);
-  const [stayDateStep, setStayDateStep] = useState<"check-in" | "check-out">("check-in");
-  const isMobile = useIsMobile();
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [guests, setGuests] = useState("2");
   const [roomCount, setRoomCount] = useState("1");
@@ -75,11 +69,16 @@ const BookingPage = () => {
   const [managerOrganizationId, setManagerOrganizationId] = useState<string | null>(null);
   const [hotelClassification, setHotelClassification] = useState<number | null>(null);
   const [roomAvailability, setRoomAvailability] = useState<Record<string, number> | null>(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(false);
   const [roomFormOpen, setRoomFormOpen] = useState(false);
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [savingRoom, setSavingRoom] = useState(false);
   const [roomForm, setRoomForm] = useState({ name: "", room_type: "suite", description: "", image_url: "", size_sqm: "", max_guests: "2", available_units: "1", nightly_rate: "", original_nightly_rate: "", currency_code: "USD", amenities: "Wi-Fi, King bed", status: "published" as "draft" | "published" | "unavailable" });
+  const updateCheckIn = useCallback((date?: Date) => {
+    setCheckIn(date);
+    if (date && checkOut && date >= checkOut) setCheckOut(undefined);
+  }, [checkOut]);
 
   const loadPage = async () => {
     setLoading(true);
@@ -142,43 +141,41 @@ const BookingPage = () => {
   useEffect(() => {
     if (!checkIn || !checkOut || checkOut <= checkIn) {
       setRoomAvailability(null);
+      setAvailabilityLoading(false);
       setAvailabilityError(false);
       return;
     }
     let active = true;
+    setRoomAvailability(null);
+    setAvailabilityLoading(true);
+    setAvailabilityError(false);
     const loadAvailability = async () => {
-      const availabilityResponse = await fetch("/api/hotel-availability", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ checkIn: format(checkIn, "yyyy-MM-dd"), checkOut: format(checkOut, "yyyy-MM-dd") }),
-        cache: "no-store",
-      });
-      const payload = await availabilityResponse.json().catch(() => null) as { availability?: Array<{ room_id: string; remaining_units: number }> } | null;
-      if (!active) return;
-      if (!availabilityResponse.ok || !payload?.availability) {
-        setRoomAvailability(null);
-        setAvailabilityError(true);
-        return;
+      try {
+        const availabilityResponse = await fetch("/api/hotel-availability", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ checkIn: format(checkIn, "yyyy-MM-dd"), checkOut: format(checkOut, "yyyy-MM-dd") }),
+          cache: "no-store",
+        });
+        const payload = await availabilityResponse.json().catch(() => null) as { availability?: Array<{ room_id: string; remaining_units: number }> } | null;
+        if (!active) return;
+        if (!availabilityResponse.ok || !payload?.availability) {
+          setAvailabilityError(true);
+          return;
+        }
+        setRoomAvailability(Object.fromEntries(payload.availability.map((row) => [row.room_id, Number(row.remaining_units)])));
+      } catch {
+        if (active) setAvailabilityError(true);
+      } finally {
+        if (active) setAvailabilityLoading(false);
       }
-      setAvailabilityError(false);
-      setRoomAvailability(Object.fromEntries(payload.availability.map((row) => [row.room_id, Number(row.remaining_units)])));
     };
     void loadAvailability();
     return () => { active = false; };
   }, [checkIn, checkOut]);
 
-  const handleStayDateSelect = (date?: Date) => {
-    if (!date) return;
-    if (stayDateStep === "check-in") {
-      setCheckIn(date);
-      if (checkOut && date >= checkOut) setCheckOut(undefined);
-      setStayDateStep("check-out");
-      return;
-    }
-    setCheckOut(date);
-  };
-
-  const selectedRoom = rooms.find((room) => room.id === selectedRoomId && room.status === "published") || null;
+  const publishedRooms = useMemo(() => rooms.filter((room) => room.status === "published"), [rooms]);
+  const selectedRoom = publishedRooms.find((room) => room.id === selectedRoomId) || null;
   const totalNights = checkIn && checkOut ? Math.max(0, Math.round((Date.UTC(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate()) - Date.UTC(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate())) / 86400000)) : 0;
   const roomSubtotal = selectedRoom ? Number(selectedRoom.nightly_rate) * totalNights * Number(roomCount) : 0;
   const applicableDiscount = Math.max(0, ...offers.filter((offer) => totalNights >= offer.minimum_nights).map((offer) => Number(offer.discount_percentage)));
@@ -347,91 +344,13 @@ const BookingPage = () => {
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
           <main className="space-y-8">
-            <Dialog open={stayDatePickerOpen} onOpenChange={setStayDatePickerOpen}>
-              <Card className="overflow-hidden border-border/70 shadow-sm">
-                <CardHeader className="pb-4">
-                  <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-sheraton-gold" />When would you like to stay?</CardTitle>
-                  <p className="text-sm text-muted-foreground">Choose your dates, guests, and rooms to see what’s available.</p>
-                </CardHeader>
-                <CardContent className="grid gap-3 pt-0 sm:grid-cols-2 lg:grid-cols-4">
-                  <div>
-                    <DialogTrigger asChild>
-                      <Button type="button" id="booking-check-in" variant="outline" aria-label={`Choose check-in date${checkIn ? `, ${format(checkIn, "PPP")}` : ""}`} onClick={() => setStayDateStep("check-in")} className="h-[72px] w-full justify-start rounded-xl px-4 text-left font-normal hover:border-sheraton-gold/60 hover:bg-sheraton-gold/5">
-                        <CalendarDays className="mr-3 h-5 w-5 shrink-0 text-sheraton-gold" />
-                        <span className="min-w-0 flex-1"><span className="block text-xs text-muted-foreground">Check-in</span><span className="block truncate text-sm font-semibold text-foreground">{checkIn ? format(checkIn, "MMM d, yyyy") : "Select date"}</span></span>
-                      </Button>
-                    </DialogTrigger>
-                  </div>
-                  <div>
-                    <DialogTrigger asChild>
-                      <Button type="button" id="booking-check-out" variant="outline" aria-label={`Choose check-out date${checkOut ? `, ${format(checkOut, "PPP")}` : ""}`} onClick={() => setStayDateStep(checkIn ? "check-out" : "check-in")} className="h-[72px] w-full justify-start rounded-xl px-4 text-left font-normal hover:border-sheraton-gold/60 hover:bg-sheraton-gold/5">
-                        <CalendarDays className="mr-3 h-5 w-5 shrink-0 text-sheraton-gold" />
-                        <span className="min-w-0 flex-1"><span className="block text-xs text-muted-foreground">Check-out</span><span className="block truncate text-sm font-semibold text-foreground">{checkOut ? format(checkOut, "MMM d, yyyy") : "Select date"}</span></span>
-                      </Button>
-                    </DialogTrigger>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="booking-guests">Guests</Label>
-                    <Select value={guests} onValueChange={setGuests}>
-                      <SelectTrigger id="booking-guests" className="h-[72px] rounded-xl px-4"><span className="flex items-center gap-3"><Users className="h-5 w-5 text-sheraton-gold" /><SelectValue /></span></SelectTrigger>
-                      <SelectContent>{Array.from({ length: 20 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "guest" : "guests"}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="booking-rooms">Rooms</Label>
-                    <Select value={roomCount} onValueChange={setRoomCount}>
-                      <SelectTrigger id="booking-rooms" className="h-[72px] rounded-xl px-4"><span className="flex items-center gap-3"><Bed className="h-5 w-5 text-sheraton-gold" /><SelectValue /></span></SelectTrigger>
-                      <SelectContent>{Array.from({ length: 10 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "room" : "rooms"}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
-              <DialogContent className="left-0 top-auto bottom-0 max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl p-5 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:max-w-[760px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6">
-                <DialogHeader className="pr-8 text-left">
-                  <DialogTitle className="text-xl">Choose your stay dates</DialogTitle>
-                  <DialogDescription>{stayDateStep === "check-in" ? "Start by choosing the day you’ll arrive." : "Now choose the day you’ll check out."}</DialogDescription>
-                </DialogHeader>
-                <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/60 p-1">
-                  <Button type="button" variant={stayDateStep === "check-in" ? "default" : "ghost"} onClick={() => setStayDateStep("check-in")} className={cn("h-auto min-h-14 flex-col items-start rounded-lg px-3 py-2 text-left", stayDateStep === "check-in" && "bg-sheraton-navy text-white hover:bg-sheraton-navy")}>
-                    <span className="text-xs opacity-75">Check-in</span><span className="text-sm font-semibold">{checkIn ? format(checkIn, "EEE, MMM d") : "Select date"}</span>
-                  </Button>
-                  <Button type="button" variant={stayDateStep === "check-out" ? "default" : "ghost"} onClick={() => setStayDateStep("check-out")} className={cn("h-auto min-h-14 flex-col items-start rounded-lg px-3 py-2 text-left", stayDateStep === "check-out" && "bg-sheraton-navy text-white hover:bg-sheraton-navy")}>
-                    <span className="text-xs opacity-75">Check-out</span><span className="text-sm font-semibold">{checkOut ? format(checkOut, "EEE, MMM d") : "Select date"}</span>
-                  </Button>
-                </div>
-                <div className="flex justify-center rounded-xl border bg-card py-2 sm:py-3">
-                  <Calendar
-                    mode="single"
-                    selected={stayDateStep === "check-in" ? checkIn : checkOut}
-                    onSelect={handleStayDateSelect}
-                    disabled={{ before: stayDateStep === "check-in" ? today : addDays(checkIn || today, 1) }}
-                    defaultMonth={stayDateStep === "check-out" && checkIn ? checkIn : checkIn || today}
-                    numberOfMonths={isMobile ? 1 : 2}
-                    modifiers={{
-                      stayStart: checkIn,
-                      stayEnd: checkOut,
-                      stayMiddle: (date) => Boolean(checkIn && checkOut && date > checkIn && date < checkOut),
-                    }}
-                    modifiersClassNames={{
-                      stayStart: "rounded-l-full bg-sheraton-gold/20",
-                      stayMiddle: "rounded-none bg-sheraton-gold/20",
-                      stayEnd: "rounded-r-full bg-sheraton-gold/20",
-                    }}
-                    className="p-2 sm:p-4"
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-4 border-t pt-4">
-                  <p className="text-sm text-muted-foreground">{checkIn && checkOut ? `${totalNights} ${totalNights === 1 ? "night" : "nights"} selected` : "Select a check-in and check-out date"}</p>
-                  <Button type="button" variant="outline" disabled={!checkIn || !checkOut} onClick={() => setStayDatePickerOpen(false)}>Done</Button>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <StayDateSelector checkIn={checkIn} checkOut={checkOut} totalNights={totalNights} onCheckInChange={updateCheckIn} onCheckOutChange={setCheckOut} guests={guests} onGuestsChange={setGuests} roomCount={roomCount} onRoomCountChange={setRoomCount} />
 
             <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground">Rates and room availability are provided by the property.</p></CardHeader>
+              <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground" aria-live="polite">{availabilityLoading ? "Checking room availability for your dates…" : availabilityError ? "Availability could not be checked. You can still continue and confirm at checkout." : "Rates and room availability are provided by the property."}</p></CardHeader>
               <CardContent className="space-y-5">
-                {loading ? <div className="space-y-3" aria-busy="true"><div className="h-40 animate-pulse rounded-xl bg-muted" /><div className="h-40 animate-pulse rounded-xl bg-muted" /></div> : rooms.filter((room) => room.status === "published").length ? rooms.filter((room) => room.status === "published").map((room) => (
-                  <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => { if (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0) setSelectedRoomId(room.id); }} onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0)) setSelectedRoomId(room.id); }} aria-disabled={Boolean(checkIn && checkOut && roomAvailability?.[room.id] === 0)} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-all hover:shadow-md", checkIn && checkOut && roomAvailability?.[room.id] === 0 && "cursor-not-allowed opacity-60", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
+                {loading ? <div className="space-y-3" aria-busy="true"><div className="h-40 animate-pulse rounded-xl bg-muted" /><div className="h-40 animate-pulse rounded-xl bg-muted" /></div> : publishedRooms.length ? publishedRooms.map((room) => (
+                  <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => { if (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0) setSelectedRoomId(room.id); }} onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0)) setSelectedRoomId(room.id); }} aria-disabled={Boolean(checkIn && checkOut && roomAvailability?.[room.id] === 0)} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-colors hover:border-sheraton-gold/50", checkIn && checkOut && roomAvailability?.[room.id] === 0 && "cursor-not-allowed opacity-60", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
                     <div className="grid sm:grid-cols-[200px_1fr]">
                       <div className="relative min-h-40 bg-gradient-to-br from-sheraton-cream to-sheraton-gold/20">{room.image_url ? <img src={room.image_url} alt={room.name} className="h-full min-h-40 w-full object-cover" /> : <div className="flex h-full min-h-40 items-center justify-center"><Hotel className="h-12 w-12 text-sheraton-gold/70" /></div>}</div>
                       <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{checkIn && checkOut && roomAvailability && <Badge variant={roomAvailability[room.id] > 0 ? "outline" : "destructive"}>{roomAvailability[room.id] > 0 ? `${roomAvailability[room.id]} available for your dates` : "Sold out for these dates"}</Badge>}{availabilityError && checkIn && checkOut && <span className="text-xs text-muted-foreground">Availability confirmed at checkout</span>}{checkIn && checkOut && roomAvailability && <Badge variant={roomAvailability[room.id] > 0 ? "outline" : "destructive"}>{roomAvailability[room.id] > 0 ? `${roomAvailability[room.id]} available for your dates` : "Sold out for these dates"}</Badge>}{availabilityError && checkIn && checkOut && <span className="text-xs text-muted-foreground">Availability confirmed at checkout</span>}{room.size_sqm && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => <span key={amenity} className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{amenity}</span>)}</div></div>
