@@ -10,8 +10,6 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Checkbox } from "../components/ui/checkbox";
-import { Calendar } from "../components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
 import { useToast } from "../hooks/use-toast";
@@ -335,8 +333,8 @@ const BookingPage = () => {
             <Card>
               <CardHeader><CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-sheraton-gold" />When would you like to stay?</CardTitle></CardHeader>
               <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-2"><Label>Check-in</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start font-normal"><CalendarDays className="mr-2 h-4 w-4" />{checkIn ? format(checkIn, "PPP") : "Choose a date"}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={checkIn} disabled={{ before: today }} onSelect={(date) => { setCheckIn(date); if (date && checkOut && date >= checkOut) setCheckOut(undefined); }} initialFocus /></PopoverContent></Popover></div>
-                <div className="space-y-2"><Label>Check-out</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start font-normal"><CalendarDays className="mr-2 h-4 w-4" />{checkOut ? format(checkOut, "PPP") : "Choose a date"}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={checkOut} disabled={{ before: checkIn || today }} onSelect={setCheckOut} initialFocus /></PopoverContent></Popover></div>
+                <div className="space-y-2"><Label htmlFor="booking-check-in">Check-in</Label><Input id="booking-check-in" type="date" min={format(today, "yyyy-MM-dd")} value={checkIn ? format(checkIn, "yyyy-MM-dd") : ""} onChange={(event) => { const value = event.target.value; const date = value ? new Date(`${value}T00:00:00`) : undefined; setCheckIn(date); if (date && checkOut && date >= checkOut) setCheckOut(undefined); }} /></div>
+                <div className="space-y-2"><Label htmlFor="booking-check-out">Check-out</Label><Input id="booking-check-out" type="date" min={format(checkIn || today, "yyyy-MM-dd")} value={checkOut ? format(checkOut, "yyyy-MM-dd") : ""} onChange={(event) => { const value = event.target.value; const minDate = format(checkIn || today, "yyyy-MM-dd"); if (value && value < minDate) return; setCheckOut(value ? new Date(`${value}T00:00:00`) : undefined); }} /></div>
                 <div className="space-y-2"><Label>Guests</Label><Select value={guests} onValueChange={setGuests}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 20 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "guest" : "guests"}</SelectItem>)}</SelectContent></Select></div>
                 <div className="space-y-2"><Label>Rooms</Label><Select value={roomCount} onValueChange={setRoomCount}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 10 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "room" : "rooms"}</SelectItem>)}</SelectContent></Select></div>
               </CardContent>
