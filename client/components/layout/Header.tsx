@@ -74,38 +74,42 @@ const Header = () => {
   // Load notifications for current user
   useEffect(() => {
     let isMounted = true;
+    let initializationId = 0;
 
-    const initNotifications = async () => {
+    const initNotifications = async (user: { id: string } | null, accessToken?: string) => {
+      const currentInitializationId = ++initializationId;
       subscriptionRef.current?.unsubscribe();
       subscriptionRef.current = null;
 
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user || !isMounted) {
-          setRewardsBalance(null);
-          clearCachedHomeIdentity();
-          setCanManageMenu(false);
-          setIsPlatformAdmin(false);
-
-          setLoading(false);
-          return;
-        }
-
-        void refreshSharedRewardsBalance();
+      if (!user) {
+        setRewardsBalance(null);
+        clearCachedHomeIdentity();
+        setCanManageMenu(false);
         setIsPlatformAdmin(false);
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          if (sessionData.session?.access_token) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      void refreshSharedRewardsBalance();
+      setIsPlatformAdmin(false);
+
+      try {
+        if (accessToken) {
+          try {
             const adminResponse = await fetch("/api/platform/admin-status", {
-              headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
+              headers: { Authorization: `Bearer ${accessToken}` },
               cache: "no-store",
             });
             const adminStatus = await adminResponse.json().catch(() => null) as { isPlatformAdmin?: boolean } | null;
-            setIsPlatformAdmin(adminResponse.ok && adminStatus?.isPlatformAdmin === true);
+            if (isMounted && currentInitializationId === initializationId) {
+              setIsPlatformAdmin(adminResponse.ok && adminStatus?.isPlatformAdmin === true);
+            }
+          } catch {
+            if (isMounted && currentInitializationId === initializationId) setIsPlatformAdmin(false);
           }
-        } catch {
-          setIsPlatformAdmin(false);
         }
+        if (!isMounted || currentInitializationId !== initializationId) return;
 
         const { data: profile } = await supabase
           .from("user_profiles")
@@ -141,12 +145,10 @@ const Header = () => {
           .limit(10);
 
         if (error) throw error;
+        if (!isMounted || currentInitializationId !== initializationId) return;
 
-        if (!isMounted) return;
         setNotifications(data || []);
         setUnreadCount((data || []).filter((n) => !n.is_read).length);
-
-        // Subscribe to real-time notifications
         subscriptionRef.current = supabase
           .channel(`notifications:${user.id}`)
           .on(
@@ -162,7 +164,6 @@ const Header = () => {
               const newNotification = payload.new as Notification;
               setNotifications((prev) => [newNotification, ...prev]);
               setUnreadCount((prev) => prev + 1);
-              // Show toast for new notification
               toast({
                 title: "New Notification",
                 description: newNotification.message,
@@ -172,14 +173,11 @@ const Header = () => {
           )
           .subscribe();
       } catch (error) {
-        console.error("Error loading notifications:", error);
-        if (isMounted) {
-          setLoading(false);
+        if (isMounted && currentInitializationId === initializationId) {
+          console.error("Error loading notifications:", error);
         }
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted && currentInitializationId === initializationId) setLoading(false);
       }
     };
 
@@ -187,30 +185,33 @@ const Header = () => {
       if (document.visibilityState === "visible") void refreshSharedRewardsBalance();
     };
 
-    initNotifications();
     document.addEventListener("visibilitychange", refreshRewardsBalance);
 
     const { data: authSubscription } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         if (!isMounted) return;
         if (!session) {
+          initializationId += 1;
           setRewardsBalance(null);
           clearCachedHomeIdentity();
           setCanManageMenu(false);
           setIsPlatformAdmin(false);
           setNotifications([]);
           setUnreadCount(0);
-
+          setLoading(false);
+          subscriptionRef.current?.unsubscribe();
+          subscriptionRef.current = null;
           return;
         }
         setTimeout(() => {
-          void initNotifications();
+          if (isMounted) void initNotifications(session.user, session.access_token);
         }, 0);
       },
     );
 
     return () => {
       isMounted = false;
+      initializationId += 1;
       document.removeEventListener("visibilitychange", refreshRewardsBalance);
       authSubscription.subscription.unsubscribe();
       subscriptionRef.current?.unsubscribe();

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { supabase } from "./supabase";
 import { useHotelTenant } from "./hotelTenant";
 
@@ -69,18 +69,29 @@ export const updateCurrentHotelRewardsEnrollment = async (enrolled: boolean) => 
 export const RewardsPointsProvider = ({ children }: { children: ReactNode }) => {
   const { tenant } = useHotelTenant();
   const [rewardsBalance, setRewardsBalance] = useState<RewardsBalance>(null);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshRewardsBalance = useCallback(async () => {
     if (!tenant) {
       setRewardsBalance(null);
       return;
     }
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+
+    const refresh = (async () => {
+      try {
+        const rewards = await fetchCurrentHotelRewards();
+        setRewardsBalance(rewards?.organizationId === tenant.organizationId
+          ? { organizationId: tenant.organizationId, availablePoints: rewards.availablePoints }
+          : null);
+      } catch {
+        setRewardsBalance(null);
+      }
+    })();
+    refreshInFlightRef.current = refresh;
     try {
-      const rewards = await fetchCurrentHotelRewards();
-      setRewardsBalance(rewards?.organizationId === tenant.organizationId
-        ? { organizationId: tenant.organizationId, availablePoints: rewards.availablePoints }
-        : null);
-    } catch {
-      setRewardsBalance(null);
+      await refresh;
+    } finally {
+      if (refreshInFlightRef.current === refresh) refreshInFlightRef.current = null;
     }
   }, [tenant]);
 
