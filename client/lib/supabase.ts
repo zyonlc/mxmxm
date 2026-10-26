@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { createClient, type Session } from '@supabase/supabase-js'
+import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -8,23 +8,37 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('Missing Supabase environment variables')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
-
 type AuthSnapshot = { session: Session | null; initialized: boolean }
-let authSnapshot: AuthSnapshot = { session: null, initialized: false }
-const authListeners = new Set<() => void>()
-
-supabase.auth.onAuthStateChange((_event, session) => {
-  authSnapshot = { session, initialized: true }
-  authListeners.forEach((listener) => listener())
-})
-
-const subscribeToAuth = (listener: () => void) => {
-  authListeners.add(listener)
-  return () => authListeners.delete(listener)
+type SupabaseAppState = {
+  client: SupabaseClient<any>
+  snapshot: AuthSnapshot
+  listeners: Set<() => void>
 }
 
-const getAuthSnapshot = () => authSnapshot
+type SupabaseGlobal = typeof globalThis & { __mizuriSupabaseState?: SupabaseAppState }
+const supabaseGlobal = globalThis as SupabaseGlobal
+const appState = supabaseGlobal.__mizuriSupabaseState ??= (() => {
+  const client = createClient(supabaseUrl, supabaseKey)
+  const state: SupabaseAppState = {
+    client,
+    snapshot: { session: null, initialized: false },
+    listeners: new Set(),
+  }
+  client.auth.onAuthStateChange((_event, session) => {
+    state.snapshot = { session, initialized: true }
+    state.listeners.forEach((listener) => listener())
+  })
+  return state
+})()
+
+export const supabase = appState.client
+
+const subscribeToAuth = (listener: () => void) => {
+  appState.listeners.add(listener)
+  return () => appState.listeners.delete(listener)
+}
+
+const getAuthSnapshot = () => appState.snapshot
 
 export const useSupabaseAuth = () => useSyncExternalStore(subscribeToAuth, getAuthSnapshot, getAuthSnapshot)
 
