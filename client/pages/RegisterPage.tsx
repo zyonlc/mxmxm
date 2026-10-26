@@ -24,6 +24,7 @@ import { Switch } from "../components/ui/switch";
 import { Badge } from "../components/ui/badge";
 import { supabase } from "../lib/supabase";
 import { useHotelTenant } from "../lib/hotelTenant";
+import { taxEntityTypes } from "../lib/booksTaxSummary";
 
 const RegisterPage: React.FC = () => {
   const navigate = useNavigate();
@@ -46,6 +47,7 @@ const RegisterPage: React.FC = () => {
     // Personal Information
     organizationName: "",
     hotelStarRating: "",
+    taxEntityType: "",
     firstName: "",
     lastName: "",
     email: "",
@@ -172,6 +174,7 @@ const RegisterPage: React.FC = () => {
           data: {
             organization_name: formData.role === "manager" ? formData.organizationName : null,
             hotel_star_rating: formData.role === "manager" && formData.hotelStarRating ? Number(formData.hotelStarRating) : null,
+            tax_entity_type: formData.role === "manager" ? formData.taxEntityType || null : null,
             first_name: formData.firstName,
             last_name: formData.lastName,
             phone: formData.phone,
@@ -202,6 +205,7 @@ const RegisterPage: React.FC = () => {
         user_id: authData.user.id,
         organization_name: formData.role === "manager" ? formData.organizationName.trim() : null,
         hotel_star_rating: formData.role === "manager" && formData.hotelStarRating ? Number(formData.hotelStarRating) : null,
+        tax_entity_type: formData.role === "manager" ? formData.taxEntityType || null : null,
         first_name: formData.firstName,
         last_name: formData.lastName,
         email: formData.email,
@@ -454,6 +458,17 @@ const RegisterPage: React.FC = () => {
             ))}
           </select>
           <p className="mt-1 text-xs text-muted-foreground">This classification determines Local Hotel Tax on room bookings.</p>
+          <label htmlFor="taxEntityType" className="mt-4 block text-sm font-medium mb-2">Organization tax entity type</label>
+          <select
+            id="taxEntityType"
+            value={formData.taxEntityType}
+            onChange={(e) => setFormData((prev) => ({ ...prev, taxEntityType: e.target.value }))}
+            className="w-full px-3 py-2 border rounded-md border-gray-300"
+          >
+            <option value="">Select later</option>
+            {taxEntityTypes.map((entityType) => <option key={entityType.value} value={entityType.value}>{entityType.label}</option>)}
+          </select>
+          <p className="mt-1 text-xs text-muted-foreground">Used to present the relevant income-tax setup in Books. You can change it later.</p>
         </div>
       )}
 

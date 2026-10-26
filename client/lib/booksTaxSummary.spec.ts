@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBooksTaxSummary } from "./booksTaxSummary";
+import { calculateBooksTaxSummary, estimateIncomeTax, type IncomeTaxSchedule } from "./booksTaxSummary";
 
 describe("calculateBooksTaxSummary", () => {
   it("separates invoice tax from income and only counts classified deductions", () => {
@@ -28,6 +28,51 @@ describe("calculateBooksTaxSummary", () => {
       expenseTax: 162,
     });
     expect(summary.invoiceIncome - summary.allowableDeductions).toBe(1300);
+  });
+
+  it("calculates only confirmed entity-specific effective schedules and treats losses as no current tax", () => {
+    const schedule: IncomeTaxSchedule = {
+      country_code: "UG",
+      tax_entity_type: "company",
+      name: "Confirmed company rate",
+      rate_method: "flat",
+      rate_schedule: [{ lower_bound: 0, upper_bound: null, rate_percentage: 30, base_tax: 0 }],
+      effective_from: "2026-01-01",
+      effective_to: null,
+      confirmed_at: "2026-06-01T00:00:00Z",
+    };
+
+    expect(estimateIncomeTax(1000, "UG", "company", "2026-12-31", [schedule])).toEqual({
+      status: "estimated",
+      estimatedTax: 300,
+      scheduleName: "Confirmed company rate",
+    });
+    expect(estimateIncomeTax(1000, "UG", "individual", "2026-12-31", [schedule]).status).toBe("unconfigured");
+    expect(estimateIncomeTax(1000, "UG", "company", "2025-12-31", [schedule]).status).toBe("unconfigured");
+    expect(estimateIncomeTax(1000, "UG", "company", "2026-12-31", [{ ...schedule, confirmed_at: null }]).status).toBe("unconfigured");
+    expect(estimateIncomeTax(-100, "UG", "company", "2026-12-31", [schedule])).toEqual({
+      status: "loss",
+      estimatedTax: 0,
+      scheduleName: null,
+    });
+  });
+
+  it("calculates a confirmed progressive schedule using the matching bracket", () => {
+    const estimate = estimateIncomeTax(150, "UG", "individual", "2026-12-31", [{
+      country_code: "UG",
+      tax_entity_type: "individual",
+      name: "Confirmed progressive schedule",
+      rate_method: "progressive",
+      rate_schedule: [
+        { lower_bound: 0, upper_bound: 100, rate_percentage: 10, base_tax: 0 },
+        { lower_bound: 100, upper_bound: null, rate_percentage: 20, base_tax: 10 },
+      ],
+      effective_from: "2026-01-01",
+      effective_to: null,
+      confirmed_at: "2026-06-01T00:00:00Z",
+    }]);
+
+    expect(estimate.estimatedTax).toBe(20);
   });
 
   it("keeps dates, currencies, void invoices, and refunded expenses out of the summary", () => {
