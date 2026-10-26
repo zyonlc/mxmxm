@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { supabase } from "./supabase";
+import { supabase, useSupabaseAuth } from "./supabase";
 import { useHotelTenant } from "./hotelTenant";
 
 export type HotelRewardsSummary = {
@@ -40,11 +40,15 @@ type RewardsPointsContextValue = {
 
 const RewardsPointsContext = createContext<RewardsPointsContextValue | null>(null);
 
-export const fetchCurrentHotelRewards = async (): Promise<HotelRewardsSummary | null> => {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error("Sign in to view hotel rewards");
+export const fetchCurrentHotelRewards = async (accessToken?: string): Promise<HotelRewardsSummary | null> => {
+  let token = accessToken;
+  if (!token) {
+    const { data: { session } } = await supabase.auth.getSession();
+    token = session?.access_token;
+  }
+  if (!token) throw new Error("Sign in to view hotel rewards");
   const response = await fetch("/api/hotel-rewards", {
-    headers: { Authorization: `Bearer ${session.access_token}` },
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   const payload = await response.json().catch(() => null) as HotelRewardsSummary | { error?: string } | null;
@@ -68,10 +72,11 @@ export const updateCurrentHotelRewardsEnrollment = async (enrolled: boolean) => 
 
 export const RewardsPointsProvider = ({ children }: { children: ReactNode }) => {
   const { tenant } = useHotelTenant();
+  const { session, initialized: authInitialized } = useSupabaseAuth();
   const [rewardsBalance, setRewardsBalance] = useState<RewardsBalance>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshRewardsBalance = useCallback(async () => {
-    if (!tenant) {
+    if (!authInitialized || !tenant || !session) {
       setRewardsBalance(null);
       return;
     }
@@ -79,7 +84,7 @@ export const RewardsPointsProvider = ({ children }: { children: ReactNode }) => 
 
     const refresh = (async () => {
       try {
-        const rewards = await fetchCurrentHotelRewards();
+        const rewards = await fetchCurrentHotelRewards(session.access_token);
         setRewardsBalance(rewards?.organizationId === tenant.organizationId
           ? { organizationId: tenant.organizationId, availablePoints: rewards.availablePoints }
           : null);
@@ -93,7 +98,7 @@ export const RewardsPointsProvider = ({ children }: { children: ReactNode }) => 
     } finally {
       if (refreshInFlightRef.current === refresh) refreshInFlightRef.current = null;
     }
-  }, [tenant]);
+  }, [authInitialized, session?.access_token, tenant]);
 
   useEffect(() => {
     setRewardsBalance(null);

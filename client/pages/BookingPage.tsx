@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
-import { supabase } from "../lib/supabase";
+import { supabase, useSupabaseAuth } from "../lib/supabase";
 import BookingCheckoutModal from "../components/booking/BookingCheckoutModal";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -58,7 +58,9 @@ const getAmenityIcon = (amenity: string) => {
 
 const BookingPage = () => {
   const { toast } = useToast();
+  const { session, initialized: authInitialized } = useSupabaseAuth();
   const { refreshRewardsBalance } = useRewardsPoints();
+  const loadedUserIdRef = useRef<string | null | undefined>(undefined);
   const [settings, setSettings] = useState<BookingSettings>({ title: "", subtitle: "" });
   const [offers, setOffers] = useState<BookingOffer[]>([]);
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
@@ -120,13 +122,10 @@ const BookingPage = () => {
     return () => controller.abort();
   }, [checkIn, checkOut]);
 
-  const loadPage = async () => {
+  const loadPage = async (user: { id: string } | null = session?.user ?? null) => {
     setLoading(true);
     try {
-      const [bookingResponse, authResult] = await Promise.all([
-        fetch("/api/hotel-booking-data", { cache: "no-store" }),
-        supabase.auth.getUser(),
-      ]);
+      const bookingResponse = await fetch("/api/hotel-booking-data", { cache: "no-store" });
       const bookingData = await bookingResponse.json().catch(() => null) as {
         tenant?: { organizationId: string };
         settings?: BookingSettings;
@@ -141,7 +140,6 @@ const BookingPage = () => {
       const now = Date.now();
       setOffers((bookingData.offers || []).filter((offer) => (!offer.starts_at || new Date(offer.starts_at).getTime() <= now) && (!offer.ends_at || new Date(offer.ends_at).getTime() > now)));
       setRooms(bookingData.rooms || []);
-      const user = authResult.data.user;
       if (user) {
         const { data: profile } = await supabase.from("user_profiles").select("role").eq("user_id", user.id).maybeSingle();
         const { data: membership } = await supabase.from("books_memberships").select("organization_id").eq("organization_id", bookingData.tenant.organizationId).eq("user_id", user.id).in("role", ["owner", "admin"]).maybeSingle();
@@ -166,7 +164,12 @@ const BookingPage = () => {
   };
 
   useEffect(() => {
-    void loadPage();
+    if (!authInitialized) return;
+    const user = session?.user ?? null;
+    const userId = user?.id ?? null;
+    if (loadedUserIdRef.current === userId) return;
+    loadedUserIdRef.current = userId;
+    void loadPage(user);
     try {
       const stored = localStorage.getItem("hotel-booking-access");
       if (stored) {
@@ -176,7 +179,7 @@ const BookingPage = () => {
     } catch {
       localStorage.removeItem("hotel-booking-access");
     }
-  }, []);
+  }, [authInitialized, session?.user.id]);
 
   const publishedRooms = useMemo(() => rooms.filter((room) => room.status === "published"), [rooms]);
   const selectedRoom = publishedRooms.find((room) => room.id === selectedRoomId) || null;

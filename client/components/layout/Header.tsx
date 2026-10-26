@@ -43,7 +43,7 @@ import {
   Sun,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { supabase, Notification } from "../../lib/supabase";
+import { supabase, useSupabaseAuth, Notification } from "../../lib/supabase";
 import { useHotelTenant } from "../../lib/hotelTenant";
 import { useRewardsPoints } from "../../lib/rewardsPointsContext";
 import { toast } from "../../hooks/use-toast";
@@ -55,6 +55,7 @@ import {
 
 const Header = () => {
   const { tenant } = useHotelTenant();
+  const { session, initialized: authInitialized } = useSupabaseAuth();
   const { rewardsBalance, setRewardsBalance, refreshRewardsBalance: refreshSharedRewardsBalance } = useRewardsPoints();
   const [isOpen, setIsOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -187,37 +188,31 @@ const Header = () => {
 
     document.addEventListener("visibilitychange", refreshRewardsBalance);
 
-    const { data: authSubscription } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (!isMounted) return;
-        if (!session) {
-          initializationId += 1;
-          setRewardsBalance(null);
-          clearCachedHomeIdentity();
-          setCanManageMenu(false);
-          setIsPlatformAdmin(false);
-          setNotifications([]);
-          setUnreadCount(0);
-          setLoading(false);
-          subscriptionRef.current?.unsubscribe();
-          subscriptionRef.current = null;
-          return;
-        }
-        setTimeout(() => {
-          if (isMounted) void initNotifications(session.user, session.access_token);
-        }, 0);
-      },
-    );
+    if (authInitialized) {
+      if (session) {
+        void initNotifications(session.user, session.access_token);
+      } else {
+        initializationId += 1;
+        setRewardsBalance(null);
+        clearCachedHomeIdentity();
+        setCanManageMenu(false);
+        setIsPlatformAdmin(false);
+        setNotifications([]);
+        setUnreadCount(0);
+        setLoading(false);
+        subscriptionRef.current?.unsubscribe();
+        subscriptionRef.current = null;
+      }
+    }
 
     return () => {
       isMounted = false;
       initializationId += 1;
       document.removeEventListener("visibilitychange", refreshRewardsBalance);
-      authSubscription.subscription.unsubscribe();
       subscriptionRef.current?.unsubscribe();
       subscriptionRef.current = null;
     };
-  }, [refreshSharedRewardsBalance]);
+  }, [authInitialized, session?.user.id, refreshSharedRewardsBalance]);
 
   const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut();
