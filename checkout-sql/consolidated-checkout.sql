@@ -1142,10 +1142,12 @@ begin
     or (v_booking.status = 'manual_review' and v_booking.payment_status = 'manual_review')
   ) then raise exception 'Special event booking is not awaiting payment'; end if;
 
-  select v_event.capacity - coalesce(sum(quantity), 0) into v_remaining
-    from public.special_event_bookings
-   where event_id = v_event.id and id <> v_booking.id
-     and (status = 'confirmed' or (status = 'manual_review' and payment_status = 'manual_review') or (status = 'pending' and payment_status = 'pending' and expires_at > now()));
+  select v_event.capacity - coalesce(sum(reserved_booking.quantity), 0) into v_remaining
+    from public.special_event_bookings as reserved_booking
+   where reserved_booking.event_id = v_event.id and reserved_booking.id <> v_booking.id
+     and (reserved_booking.status = 'confirmed'
+       or (reserved_booking.status = 'manual_review' and reserved_booking.payment_status = 'manual_review')
+       or (reserved_booking.status = 'pending' and reserved_booking.payment_status = 'pending' and reserved_booking.expires_at > now()));
   select v_type.capacity - coalesce(sum(b.quantity), 0) into v_type_remaining
     from public.special_event_ticket_types v_type
     left join public.special_event_bookings b on b.ticket_type_id = v_type.id and b.id <> v_booking.id
