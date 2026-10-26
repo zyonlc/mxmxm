@@ -16,7 +16,7 @@ const invoke = async (handler: typeof getPlatformAdminStatus, headers: Record<st
     status(code: number) { result.statusCode = code; return this; },
     json(value: unknown) { result.body = value; return this; },
   };
-  await handler({ headers, body } as Parameters<typeof handler>[0], response as Parameters<typeof handler>[1], (() => undefined) as Parameters<typeof handler>[2]);
+  await handler({ headers, body } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1], (() => undefined) as Parameters<typeof handler>[2]);
   return result;
 };
 

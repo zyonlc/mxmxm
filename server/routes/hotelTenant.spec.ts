@@ -44,7 +44,7 @@ describe("getHotelRewards", () => {
     await getHotelRewards({
       headers: { authorization: "Bearer user-token", host: "abc123.projects.builder.my" },
       hostname: "abc123.projects.builder.my",
-    } as Parameters<typeof getHotelRewards>[0], response as Parameters<typeof getHotelRewards>[1], (() => undefined) as Parameters<typeof getHotelRewards>[2]);
+    } as unknown as Parameters<typeof getHotelRewards>[0], response as unknown as Parameters<typeof getHotelRewards>[1], (() => undefined) as Parameters<typeof getHotelRewards>[2]);
 
     expect(result.statusCode).toBe(200);
     expect(result.body).toEqual({ organizationId, availablePoints: 20 });
@@ -98,7 +98,7 @@ describe("resolveRequestHotelTenant", () => {
     const proxiedRequest = {
       hostname: "localhost",
       headers: { "x-forwarded-host": "abc123.projects.builder.my:8080" },
-    } as Parameters<typeof resolveRequestHotelTenant>[0];
+    } as unknown as Parameters<typeof resolveRequestHotelTenant>[0];
 
     await expect(resolveRequestHotelTenant(proxiedRequest)).resolves.toMatchObject({
       organizationId,

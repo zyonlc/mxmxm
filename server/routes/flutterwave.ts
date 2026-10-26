@@ -167,6 +167,25 @@ const updatePaymentAttemptAsService = async (txRef: string, values: Record<strin
   }
 };
 
+const updatePendingOrderAsService = async (orderId: string, values: Record<string, unknown>, txRef: string) => {
+  const { supabaseUrl, supabaseAnonKey, supabaseServiceRoleKey } = getConfiguration();
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/menu_orders?id=eq.${encodeURIComponent(orderId)}&payment_status=eq.pending&payment_reference=eq.${encodeURIComponent(txRef)}`,
+    {
+      method: "PATCH",
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        "content-type": "application/json",
+        prefer: "return=minimal",
+      },
+      body: JSON.stringify({ ...values, updated_at: new Date().toISOString() }),
+    },
+  );
+
+  if (!response.ok) throw new Error("Unable to update payment order");
+};
+
 type MenuPaymentConfirmation = {
   orderId: string;
   orderNumber: string;
@@ -301,9 +320,9 @@ const createMenuPaymentAttempt = async (order: MenuOrder, txRef: string) => {
 
 export const prepareFlutterwaveHostedSession = async (
   { orderId }: FlutterwaveHostedSessionInput,
-  authorization?: string,
   tenantOrganizationId: string,
   tenantDomain: string,
+  authorization?: string,
 ) => {
   let txRef: string | undefined;
 
@@ -391,9 +410,9 @@ export const createFlutterwaveHostedSession: RequestHandler = async (req, res) =
     const tenant = await resolveRequestHotelTenant(req);
     const paymentSession = await prepareFlutterwaveHostedSession(
       req.body as FlutterwaveHostedSessionInput,
-      req.headers.authorization,
       tenant.organizationId,
       tenant.domain,
+      req.headers.authorization,
     );
     return res.json(paymentSession);
   } catch (error) {

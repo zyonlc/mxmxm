@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
-import { supabase } from "../lib/supabase";
+import { supabase, useSupabaseAuth } from "../lib/supabase";
 import BookingCheckoutModal from "../components/booking/BookingCheckoutModal";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -10,12 +10,11 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Checkbox } from "../components/ui/checkbox";
-import { Calendar } from "../components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import StayDateSelector from "../components/booking/StayDateSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
 import { useToast } from "../hooks/use-toast";
-import { Bed, CalendarDays, Check, CheckCircle, Crown, Gift, Hotel, MapPin, Plus, Users, Wifi } from "lucide-react";
+import { Bed, BedDouble, BriefcaseBusiness, Building2, CalendarDays, Check, CheckCircle, Crown, Gift, Hotel, Plus, Ruler, Users, Wifi, Wine } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useRewardsPoints } from "../lib/rewardsPointsContext";
 
@@ -42,16 +41,26 @@ type HotelRoom = {
 
 type BookingOffer = { id: string; title: string; description: string; discount_percentage: number; minimum_nights: number; starts_at: string | null; ends_at: string | null };
 type BookingSettings = { title: string; subtitle: string };
+type RoomAvailability = { room_id: string; remaining_units: number };
 type SavedBookingAccess = { bookingId: string; accessToken: string; confirmationNumber: string };
 type ManagerBooking = { id: string; confirmation_number: string; room_id: string; check_in: string; check_out: string; guest_first_name: string; guest_last_name: string; guest_email: string; guest_count: number; booking_status: string; payment_status: string; total_amount: number; currency_code: string; books_accounting_status: string; books_accounting_error: string | null; hotel_rooms: { name: string } | null; hotel_payment_attempts: { status: string }[] };
 
 const currencies = ["USD", "UGX", "EUR", "GBP", "KES", "TZS", "RWF"];
-const today = new Date();
 const money = (value: number, currency: string) => new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value || 0);
+const getAmenityIcon = (amenity: string) => {
+  const value = amenity.toLowerCase();
+  if (value.includes("bed")) return BedDouble;
+  if (value.includes("view")) return Building2;
+  if (value.includes("bar")) return Wine;
+  if (value.includes("desk")) return BriefcaseBusiness;
+  return Wifi;
+};
 
 const BookingPage = () => {
   const { toast } = useToast();
+  const { session, initialized: authInitialized } = useSupabaseAuth();
   const { refreshRewardsBalance } = useRewardsPoints();
+  const loadedUserIdRef = useRef<string | null | undefined>(undefined);
   const [settings, setSettings] = useState<BookingSettings>({ title: "", subtitle: "" });
   const [offers, setOffers] = useState<BookingOffer[]>([]);
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
@@ -60,6 +69,8 @@ const BookingPage = () => {
   const [recoveringBooking, setRecoveringBooking] = useState(false);
   const [checkIn, setCheckIn] = useState<Date>();
   const [checkOut, setCheckOut] = useState<Date>();
+  const [availability, setAvailability] = useState<{ dateKey: string; rooms: Record<string, number> } | null>(null);
+  const [availabilityErrorFor, setAvailabilityErrorFor] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [guests, setGuests] = useState("2");
   const [roomCount, setRoomCount] = useState("1");
@@ -70,20 +81,51 @@ const BookingPage = () => {
   const [managerUserId, setManagerUserId] = useState<string | null>(null);
   const [managerOrganizationId, setManagerOrganizationId] = useState<string | null>(null);
   const [hotelClassification, setHotelClassification] = useState<number | null>(null);
-  const [roomAvailability, setRoomAvailability] = useState<Record<string, number> | null>(null);
-  const [availabilityError, setAvailabilityError] = useState(false);
   const [roomFormOpen, setRoomFormOpen] = useState(false);
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [savingRoom, setSavingRoom] = useState(false);
   const [roomForm, setRoomForm] = useState({ name: "", room_type: "suite", description: "", image_url: "", size_sqm: "", max_guests: "2", available_units: "1", nightly_rate: "", original_nightly_rate: "", currency_code: "USD", amenities: "Wi-Fi, King bed", status: "published" as "draft" | "published" | "unavailable" });
+  const updateCheckIn = useCallback((date?: Date) => {
+    setCheckIn(date);
+    if (date && checkOut && date >= checkOut) setCheckOut(undefined);
+  }, [checkOut]);
 
-  const loadPage = async () => {
+  useEffect(() => {
+    if (!checkIn || !checkOut || checkOut <= checkIn) {
+      setAvailability(null);
+      setAvailabilityErrorFor(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setAvailability(null);
+    setAvailabilityErrorFor(null);
+    const checkInValue = format(checkIn, "yyyy-MM-dd");
+    const checkOutValue = format(checkOut, "yyyy-MM-dd");
+    const dateKey = `${checkInValue}/${checkOutValue}`;
+
+    void fetch("/api/hotel-availability", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ checkIn: checkInValue, checkOut: checkOutValue }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => null) as { availability?: RoomAvailability[]; error?: string } | null;
+      if (!response.ok || !payload || !Array.isArray(payload.availability)) throw new Error(payload?.error || "Availability could not be checked");
+      return payload.availability;
+    }).then((results) => {
+      if (!controller.signal.aborted) setAvailability({ dateKey, rooms: Object.fromEntries(results.map(({ room_id, remaining_units }) => [room_id, remaining_units])) });
+    }).catch(() => {
+      if (!controller.signal.aborted) setAvailabilityErrorFor(dateKey);
+    });
+
+    return () => controller.abort();
+  }, [checkIn, checkOut]);
+
+  const loadPage = async (user: { id: string } | null = session?.user ?? null) => {
     setLoading(true);
     try {
-      const [bookingResponse, authResult] = await Promise.all([
-        fetch("/api/hotel-booking-data", { cache: "no-store" }),
-        supabase.auth.getUser(),
-      ]);
+      const bookingResponse = await fetch("/api/hotel-booking-data", { cache: "no-store" });
       const bookingData = await bookingResponse.json().catch(() => null) as {
         tenant?: { organizationId: string };
         settings?: BookingSettings;
@@ -98,7 +140,6 @@ const BookingPage = () => {
       const now = Date.now();
       setOffers((bookingData.offers || []).filter((offer) => (!offer.starts_at || new Date(offer.starts_at).getTime() <= now) && (!offer.ends_at || new Date(offer.ends_at).getTime() > now)));
       setRooms(bookingData.rooms || []);
-      const user = authResult.data.user;
       if (user) {
         const { data: profile } = await supabase.from("user_profiles").select("role").eq("user_id", user.id).maybeSingle();
         const { data: membership } = await supabase.from("books_memberships").select("organization_id").eq("organization_id", bookingData.tenant.organizationId).eq("user_id", user.id).in("role", ["owner", "admin"]).maybeSingle();
@@ -123,7 +164,12 @@ const BookingPage = () => {
   };
 
   useEffect(() => {
-    void loadPage();
+    if (!authInitialized) return;
+    const user = session?.user ?? null;
+    const userId = user?.id ?? null;
+    if (loadedUserIdRef.current === userId) return;
+    loadedUserIdRef.current = userId;
+    void loadPage(user);
     try {
       const stored = localStorage.getItem("hotel-booking-access");
       if (stored) {
@@ -133,38 +179,16 @@ const BookingPage = () => {
     } catch {
       localStorage.removeItem("hotel-booking-access");
     }
-  }, []);
+  }, [authInitialized, session?.user.id]);
 
-  useEffect(() => {
-    if (!checkIn || !checkOut || checkOut <= checkIn) {
-      setRoomAvailability(null);
-      setAvailabilityError(false);
-      return;
-    }
-    let active = true;
-    const loadAvailability = async () => {
-      const availabilityResponse = await fetch("/api/hotel-availability", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ checkIn: format(checkIn, "yyyy-MM-dd"), checkOut: format(checkOut, "yyyy-MM-dd") }),
-        cache: "no-store",
-      });
-      const payload = await availabilityResponse.json().catch(() => null) as { availability?: Array<{ room_id: string; remaining_units: number }> } | null;
-      if (!active) return;
-      if (!availabilityResponse.ok || !payload?.availability) {
-        setRoomAvailability(null);
-        setAvailabilityError(true);
-        return;
-      }
-      setAvailabilityError(false);
-      setRoomAvailability(Object.fromEntries(payload.availability.map((row) => [row.room_id, Number(row.remaining_units)])));
-    };
-    void loadAvailability();
-    return () => { active = false; };
-  }, [checkIn, checkOut]);
-
-  const selectedRoom = rooms.find((room) => room.id === selectedRoomId && room.status === "published") || null;
+  const publishedRooms = useMemo(() => rooms.filter((room) => room.status === "published"), [rooms]);
+  const selectedRoom = publishedRooms.find((room) => room.id === selectedRoomId) || null;
   const totalNights = checkIn && checkOut ? Math.max(0, Math.round((Date.UTC(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate()) - Date.UTC(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate())) / 86400000)) : 0;
+  const currentDateKey = checkIn && checkOut ? `${format(checkIn, "yyyy-MM-dd")}/${format(checkOut, "yyyy-MM-dd")}` : null;
+  const currentAvailability = availability?.dateKey === currentDateKey ? availability.rooms : null;
+  const selectedRemainingUnits = selectedRoom && currentAvailability ? currentAvailability[selectedRoom.id] ?? 0 : null;
+  const selectedRoomUnavailable = selectedRemainingUnits !== null && selectedRemainingUnits < Number(roomCount);
+  const alternativeRooms = currentAvailability ? publishedRooms.filter((room) => room.id !== selectedRoomId && (currentAvailability[room.id] ?? 0) >= Number(roomCount)) : [];
   const roomSubtotal = selectedRoom ? Number(selectedRoom.nightly_rate) * totalNights * Number(roomCount) : 0;
   const applicableDiscount = Math.max(0, ...offers.filter((offer) => totalNights >= offer.minimum_nights).map((offer) => Number(offer.discount_percentage)));
   const stayDiscount = roomSubtotal * applicableDiscount / 100;
@@ -332,24 +356,19 @@ const BookingPage = () => {
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
           <main className="space-y-8">
-            <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-sheraton-gold" />When would you like to stay?</CardTitle></CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-2"><Label>Check-in</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start font-normal"><CalendarDays className="mr-2 h-4 w-4" />{checkIn ? format(checkIn, "PPP") : "Choose a date"}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={checkIn} disabled={{ before: today }} onSelect={(date) => { setCheckIn(date); if (date && checkOut && date >= checkOut) setCheckOut(undefined); }} initialFocus /></PopoverContent></Popover></div>
-                <div className="space-y-2"><Label>Check-out</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start font-normal"><CalendarDays className="mr-2 h-4 w-4" />{checkOut ? format(checkOut, "PPP") : "Choose a date"}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={checkOut} disabled={{ before: checkIn || today }} onSelect={setCheckOut} initialFocus /></PopoverContent></Popover></div>
-                <div className="space-y-2"><Label>Guests</Label><Select value={guests} onValueChange={setGuests}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 20 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "guest" : "guests"}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-2"><Label>Rooms</Label><Select value={roomCount} onValueChange={setRoomCount}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 10 }, (_, index) => String(index + 1)).map((count) => <SelectItem key={count} value={count}>{count} {count === "1" ? "room" : "rooms"}</SelectItem>)}</SelectContent></Select></div>
-              </CardContent>
-            </Card>
+            <StayDateSelector checkIn={checkIn} checkOut={checkOut} totalNights={totalNights} onCheckInChange={updateCheckIn} onCheckOutChange={setCheckOut} guests={guests} onGuestsChange={setGuests} roomCount={roomCount} onRoomCountChange={setRoomCount} />
 
             <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground">Rates and room availability are provided by the property.</p></CardHeader>
+              <CardHeader><CardTitle className="flex items-center gap-2"><Bed className="h-5 w-5 text-sheraton-gold" />Choose your room</CardTitle><p className="text-sm text-muted-foreground">Choose your preferred room; availability is confirmed before the reservation is held.</p></CardHeader>
               <CardContent className="space-y-5">
-                {loading ? <div className="space-y-3" aria-busy="true"><div className="h-40 animate-pulse rounded-xl bg-muted" /><div className="h-40 animate-pulse rounded-xl bg-muted" /></div> : rooms.filter((room) => room.status === "published").length ? rooms.filter((room) => room.status === "published").map((room) => (
-                  <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => { if (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0) setSelectedRoomId(room.id); }} onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && (!checkIn || !checkOut || roomAvailability?.[room.id] !== 0)) setSelectedRoomId(room.id); }} aria-disabled={Boolean(checkIn && checkOut && roomAvailability?.[room.id] === 0)} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-all hover:shadow-md", checkIn && checkOut && roomAvailability?.[room.id] === 0 && "cursor-not-allowed opacity-60", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
+                {currentDateKey && !currentAvailability && availabilityErrorFor !== currentDateKey && <p className="text-xs text-muted-foreground" role="status">Checking room availability in the background…</p>}
+                {currentDateKey && availabilityErrorFor === currentDateKey && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="status">Availability couldn’t be refreshed. You can continue, and the hotel will confirm inventory before holding your room.</p>}
+                {selectedRoomUnavailable && <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm" role="alert"><p className="font-medium text-destructive">{selectedRoom.name} is no longer available for these dates with the selected room count.</p>{alternativeRooms.length > 0 ? <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-muted-foreground">Available alternatives:</span>{alternativeRooms.map((room) => <Button key={room.id} type="button" variant="outline" size="sm" onClick={() => setSelectedRoomId(room.id)}>{room.name}</Button>)}</div> : <p className="mt-2 text-muted-foreground">Try different dates or reduce the number of rooms.</p>}</div>}
+                {loading ? <div className="space-y-3" aria-busy="true"><div className="h-40 animate-pulse rounded-xl bg-muted" /><div className="h-40 animate-pulse rounded-xl bg-muted" /></div> : publishedRooms.length ? publishedRooms.map((room) => (
+                  <article key={room.id} role="radio" aria-checked={selectedRoomId === room.id} tabIndex={0} onClick={() => setSelectedRoomId(room.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedRoomId(room.id); }} className={cn("cursor-pointer overflow-hidden rounded-xl border transition-colors hover:border-sheraton-gold/50", selectedRoomId === room.id ? "border-sheraton-gold bg-sheraton-gold/5 shadow-sm" : "border-border")}>
                     <div className="grid sm:grid-cols-[200px_1fr]">
                       <div className="relative min-h-40 bg-gradient-to-br from-sheraton-cream to-sheraton-gold/20">{room.image_url ? <img src={room.image_url} alt={room.name} className="h-full min-h-40 w-full object-cover" /> : <div className="flex h-full min-h-40 items-center justify-center"><Hotel className="h-12 w-12 text-sheraton-gold/70" /></div>}</div>
-                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{checkIn && checkOut && roomAvailability && <Badge variant={roomAvailability[room.id] > 0 ? "outline" : "destructive"}>{roomAvailability[room.id] > 0 ? `${roomAvailability[room.id]} available for your dates` : "Sold out for these dates"}</Badge>}{availabilityError && checkIn && checkOut && <span className="text-xs text-muted-foreground">Availability confirmed at checkout</span>}{checkIn && checkOut && roomAvailability && <Badge variant={roomAvailability[room.id] > 0 ? "outline" : "destructive"}>{roomAvailability[room.id] > 0 ? `${roomAvailability[room.id]} available for your dates` : "Sold out for these dates"}</Badge>}{availabilityError && checkIn && checkOut && <span className="text-xs text-muted-foreground">Availability confirmed at checkout</span>}{room.size_sqm && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => <span key={amenity} className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5" />{amenity}</span>)}</div></div>
+                      <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-1 flex flex-wrap items-center gap-2"><div><h3 className="text-lg font-semibold text-sheraton-navy">{room.name}</h3><p className="mt-0.5 text-xs text-muted-foreground">{room.hotel_name || "Hotel"}{room.hotel_city ? ` · ${room.hotel_city}` : ""}{room.hotel_country ? `, ${room.hotel_country}` : ""}{room.hotel_classification ? ` · ${room.hotel_classification}-star hotel` : ""}</p></div>{selectedRoomId === room.id && <Badge className="bg-sheraton-gold text-sheraton-navy"><Check className="mr-1 h-3 w-3" />Selected</Badge>}{currentAvailability && <Badge variant={currentAvailability[room.id] >= Number(roomCount) ? "outline" : "destructive"}>{currentAvailability[room.id] >= Number(roomCount) ? "Available" : "Unavailable"}</Badge>}</div><p className="max-w-xl text-sm text-muted-foreground">{room.description}</p></div><div className="text-right">{room.original_nightly_rate && <p className="text-xs text-muted-foreground line-through">{money(Number(room.original_nightly_rate), room.currency_code.trim())}</p>}<p className="text-xl font-bold text-sheraton-navy">{money(Number(room.nightly_rate), room.currency_code.trim())}</p><p className="text-xs text-muted-foreground">per room / night</p></div></div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Up to {room.max_guests} guests</span>{room.size_sqm && <span className="inline-flex items-center gap-1"><Ruler className="h-3.5 w-3.5" />{room.size_sqm} m²</span>}{room.amenities.slice(0, 5).map((amenity) => { const AmenityIcon = getAmenityIcon(amenity); return <span key={amenity} className="inline-flex items-center gap-1"><AmenityIcon className="h-3.5 w-3.5" />{amenity}</span>; })}</div></div>
                     </div>
                   </article>
                 )) : <div className="rounded-xl border border-dashed p-8 text-center"><Hotel className="mx-auto mb-3 h-9 w-9 text-muted-foreground" /><h3 className="font-semibold">No rooms are available yet</h3><p className="mt-1 text-sm text-muted-foreground">Published room listings will appear here as soon as the hotel adds them.</p></div>}
@@ -364,8 +383,8 @@ const BookingPage = () => {
               <CardHeader><CardTitle className="flex items-center gap-2"><Gift className="h-5 w-5 text-sheraton-gold" />Booking summary</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 {selectedRoom ? <><div className="rounded-lg bg-sheraton-gold/10 p-3"><p className="font-semibold text-sheraton-navy">{selectedRoom.name}</p><p className="mt-1 text-sm text-muted-foreground">{guests} guests · {roomCount} {Number(roomCount) === 1 ? "room" : "rooms"}</p></div><div className="space-y-2 text-sm">{checkIn && <div className="flex justify-between"><span>Check-in</span><span>{format(checkIn, "MMM d, yyyy")}</span></div>}{checkOut && <div className="flex justify-between"><span>Check-out</span><span>{format(checkOut, "MMM d, yyyy")}</span></div>}{totalNights > 0 && <div className="flex justify-between"><span>Length of stay</span><span>{totalNights} {totalNights === 1 ? "night" : "nights"}</span></div>}<Separator /><div className="flex justify-between"><span>Room rate</span><span>{money(roomSubtotal, selectedRoom.currency_code.trim())}</span></div>{stayDiscount > 0 && <div className="flex justify-between text-green-700"><span>Extended-stay savings</span><span>−{money(stayDiscount, selectedRoom.currency_code.trim())}</span></div>}<div className="flex justify-between font-semibold"><span>Room subtotal</span><span>{money(roomSubtotal - stayDiscount, selectedRoom.currency_code.trim())}</span></div><p className="text-xs leading-5 text-muted-foreground">18% Uganda VAT and Local Hotel Tax are calculated securely at checkout using the hotel classification and nightly room rate. Applicable stay offers are loaded from the database; final taxes and amount due are confirmed before payment.</p></div></> : <div className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">Choose a room and stay dates to see your estimate.</div>}
-                <Button className="w-full sheraton-gradient text-white" size="lg" disabled={!selectedRoom || !checkIn || !checkOut || totalNights <= 0 || Number(guests) > selectedRoom.max_guests * Number(roomCount) || Boolean(checkIn && checkOut && roomAvailability && (roomAvailability[selectedRoom?.id || ""] ?? 0) < Number(roomCount))} onClick={() => setCheckoutOpen(true)}><CalendarDays className="mr-2 h-4 w-4" />Continue to guest details</Button>
-                {selectedRoom && Number(guests) > selectedRoom.max_guests * Number(roomCount) && <p className="text-xs text-destructive">The selected room inventory cannot accommodate this number of guests.</p>}{selectedRoom && checkIn && checkOut && roomAvailability && (roomAvailability[selectedRoom.id] ?? 0) < Number(roomCount) && <p className="text-xs text-destructive">Only {roomAvailability[selectedRoom.id] ?? 0} room(s) are available for those dates.</p>}
+                <Button className="w-full sheraton-gradient text-white" size="lg" disabled={!selectedRoom || !checkIn || !checkOut || totalNights <= 0 || Number(guests) > selectedRoom.max_guests * Number(roomCount) || selectedRoomUnavailable} onClick={() => setCheckoutOpen(true)}><CalendarDays className="mr-2 h-4 w-4" />Continue to guest details</Button>
+                {selectedRoom && Number(guests) > selectedRoom.max_guests * Number(roomCount) && <p className="text-xs text-destructive">The selected room inventory cannot accommodate this number of guests.</p>}
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground"><CheckCircle className="h-3.5 w-3.5 text-green-600" />Secure checkout · Payment via Flutterwave</div>
               </CardContent>
             </Card>

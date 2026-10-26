@@ -5,7 +5,7 @@ import Header from "./components/layout/Header";
 import ServicesFooter from "./components/layout/ServicesFooter";
 import ServicesHomePage from "./pages/ServicesHomePage";
 import HomePage from "./pages/HomePage";
-import { supabase } from "./lib/supabase";
+import { supabase, useSupabaseAuth } from "./lib/supabase";
 import { RewardsPointsProvider } from "./lib/rewardsPointsContext";
 import {
   cacheHomeIdentity,
@@ -52,6 +52,7 @@ function RoleAwareHomePage() {
   const [role, setRole] = useState<HomeRole>(cachedIdentity?.role ?? "guest");
   const [displayName, setDisplayName] = useState(cachedIdentity?.displayName ?? "Special Guest");
   const [isReady, setIsReady] = useState(Boolean(cachedIdentity));
+  const { session, initialized: authInitialized } = useSupabaseAuth();
 
   useEffect(() => {
     let active = true;
@@ -99,26 +100,14 @@ function RoleAwareHomePage() {
       setIsReady(true);
     };
 
-    const initialize = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      await loadHomeIdentity(user);
-    };
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setTimeout(() => {
-          loadHomeIdentity(session?.user ?? null).catch(setGuestIdentity);
-        }, 0);
-      },
-    );
-
-    initialize().catch(setGuestIdentity);
+    if (authInitialized) {
+      void loadHomeIdentity(session?.user ?? null).catch(setGuestIdentity);
+    }
 
     return () => {
       active = false;
-      subscription.unsubscribe();
     };
-  }, []);
+  }, [authInitialized, session?.user.id]);
 
   if (!isReady) {
     return <div className="min-h-screen" aria-busy="true" />;

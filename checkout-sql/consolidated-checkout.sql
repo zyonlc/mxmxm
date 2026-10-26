@@ -1081,10 +1081,10 @@ begin
   select * into v_event from public.special_events where id = v_event.id for update;
   select * into v_booking from public.special_event_bookings where id = target_booking_id for update;
 
-  select * into v_payment
-    from public.special_event_payment_attempts
-   where booking_id = v_booking.id
-     and transaction_id = target_transaction_id
+  select payment_attempt.* into v_payment
+    from public.special_event_payment_attempts as payment_attempt
+   where payment_attempt.booking_id = v_booking.id
+     and payment_attempt.transaction_id = target_transaction_id
      and status in ('verified', 'manual_review', 'successful')
    for update;
   if not found then raise exception 'Verified payment attempt not found'; end if;
@@ -1092,9 +1092,9 @@ begin
     raise exception 'Verified payment amount does not match booking';
   end if;
 
-  select * into existing_payment
-    from public.special_event_payments
-   where booking_id = v_booking.id and transaction_id = target_transaction_id;
+  select event_payment.* into existing_payment
+    from public.special_event_payments as event_payment
+   where event_payment.booking_id = v_booking.id and event_payment.transaction_id = target_transaction_id;
   if found and not (
     existing_payment.status = 'manual_review'
     and v_booking.status = 'manual_review'
@@ -1106,9 +1106,9 @@ begin
     return;
   end if;
 
-  select * into prior_payment
-    from public.special_event_payments
-   where booking_id = v_booking.id
+  select event_payment.* into prior_payment
+    from public.special_event_payments as event_payment
+   where event_payment.booking_id = v_booking.id
    for update;
   if (found and prior_payment.transaction_id is distinct from target_transaction_id)
      or exists (
@@ -1142,10 +1142,12 @@ begin
     or (v_booking.status = 'manual_review' and v_booking.payment_status = 'manual_review')
   ) then raise exception 'Special event booking is not awaiting payment'; end if;
 
-  select v_event.capacity - coalesce(sum(quantity), 0) into v_remaining
-    from public.special_event_bookings
-   where event_id = v_event.id and id <> v_booking.id
-     and (status = 'confirmed' or (status = 'manual_review' and payment_status = 'manual_review') or (status = 'pending' and payment_status = 'pending' and expires_at > now()));
+  select v_event.capacity - coalesce(sum(reserved_booking.quantity), 0) into v_remaining
+    from public.special_event_bookings as reserved_booking
+   where reserved_booking.event_id = v_event.id and reserved_booking.id <> v_booking.id
+     and (reserved_booking.status = 'confirmed'
+       or (reserved_booking.status = 'manual_review' and reserved_booking.payment_status = 'manual_review')
+       or (reserved_booking.status = 'pending' and reserved_booking.payment_status = 'pending' and reserved_booking.expires_at > now()));
   select v_type.capacity - coalesce(sum(b.quantity), 0) into v_type_remaining
     from public.special_event_ticket_types v_type
     left join public.special_event_bookings b on b.ticket_type_id = v_type.id and b.id <> v_booking.id
@@ -1183,7 +1185,7 @@ begin
     coalesce(nullif(trim(v_booking.attendee_names[seq]), ''), concat_ws(' ', v_booking.guest_first_name, v_booking.guest_last_name)), v_booking.guest_email
   from generate_series(1, v_booking.quantity) seq
   on conflict (booking_id, ticket_number) do nothing;
-  select ticket_token into v_ticket from public.special_event_tickets where booking_id = v_booking.id and ticket_number = 1;
+  select ticket.ticket_token into v_ticket from public.special_event_tickets as ticket where ticket.booking_id = v_booking.id and ticket.ticket_number = 1;
 
   update public.special_event_bookings
      set status = 'confirmed', payment_status = 'paid', payment_verified_at = now(),

@@ -18,7 +18,6 @@ import LiveChatTab from "./tasks/components/LiveChatTab/LiveChatTab";
 import ReportsTab from "./tasks/components/ReportsTab/ReportsTab";
 
 interface TaskUI extends TaskType {
-  category?: "operations" | "service" | "training" | "maintenance";
   assignedTo?: string;
   dueDate?: string;
   createdAt?: string;
@@ -755,7 +754,7 @@ const TasksPage: React.FC = () => {
               }
               onRemoveAttachment={(id) =>
                 setFileAttachments((prev) =>
-                  prev.filter((att) => att.id !== id)
+                  prev.filter((att) => att.attachmentId !== id)
                 )
               }
               onCreateTask={handleCreateTask}

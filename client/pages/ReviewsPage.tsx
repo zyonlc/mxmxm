@@ -5,6 +5,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Camera,
+  Crown,
   MapPin,
   Calendar,
   User,

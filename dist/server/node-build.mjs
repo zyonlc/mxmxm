@@ -573,6 +573,23 @@ const updatePaymentAttemptAsService = async (txRef, values) => {
     throw new Error("Unable to update payment attempt");
   }
 };
+const updatePendingOrderAsService = async (orderId, values, txRef) => {
+  const { supabaseUrl, supabaseAnonKey, supabaseServiceRoleKey } = getConfiguration$2();
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/menu_orders?id=eq.${encodeURIComponent(orderId)}&payment_status=eq.pending&payment_reference=eq.${encodeURIComponent(txRef)}`,
+    {
+      method: "PATCH",
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        "content-type": "application/json",
+        prefer: "return=minimal"
+      },
+      body: JSON.stringify({ ...values, updated_at: (/* @__PURE__ */ new Date()).toISOString() })
+    }
+  );
+  if (!response.ok) throw new Error("Unable to update payment order");
+};
 const confirmMenuPaymentAsService = async (orderId, txRef, transactionId) => {
   const { supabaseUrl, supabaseAnonKey, supabaseServiceRoleKey } = getConfiguration$2();
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/confirm_menu_flutterwave_payment`, {
@@ -665,7 +682,7 @@ const createMenuPaymentAttempt = async (order, txRef) => {
   if (!attempt) throw new Error("Payment attempt was not returned");
   return attempt;
 };
-const prepareFlutterwaveHostedSession = async ({ orderId }, authorization, tenantOrganizationId, tenantDomain) => {
+const prepareFlutterwaveHostedSession = async ({ orderId }, tenantOrganizationId, tenantDomain, authorization) => {
   let txRef;
   try {
     if (!orderId) throw new Error("Order ID is required");
@@ -745,9 +762,9 @@ const createFlutterwaveHostedSession = async (req, res) => {
     const tenant = await resolveRequestHotelTenant(req);
     const paymentSession = await prepareFlutterwaveHostedSession(
       req.body,
-      req.headers.authorization,
       tenant.organizationId,
-      tenant.domain
+      tenant.domain,
+      req.headers.authorization
     );
     return res.json(paymentSession);
   } catch (error) {

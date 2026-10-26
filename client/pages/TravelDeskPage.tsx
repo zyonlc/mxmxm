@@ -59,7 +59,6 @@ import {
   Train,
   Ship,
   Bike,
-  Walking,
   Coffee,
   Utensils,
   Building,

@@ -1,4 +1,5 @@
-import { createClient } from '@supabase/supabase-js'
+import { useSyncExternalStore } from 'react'
+import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -7,7 +8,39 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('Missing Supabase environment variables')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+type AuthSnapshot = { session: Session | null; initialized: boolean }
+type SupabaseAppState = {
+  client: SupabaseClient<any>
+  snapshot: AuthSnapshot
+  listeners: Set<() => void>
+}
+
+type SupabaseGlobal = typeof globalThis & { __mizuriSupabaseState?: SupabaseAppState }
+const supabaseGlobal = globalThis as SupabaseGlobal
+const appState = supabaseGlobal.__mizuriSupabaseState ??= (() => {
+  const client = createClient(supabaseUrl, supabaseKey)
+  const state: SupabaseAppState = {
+    client,
+    snapshot: { session: null, initialized: false },
+    listeners: new Set(),
+  }
+  client.auth.onAuthStateChange((_event, session) => {
+    state.snapshot = { session, initialized: true }
+    state.listeners.forEach((listener) => listener())
+  })
+  return state
+})()
+
+export const supabase = appState.client
+
+const subscribeToAuth = (listener: () => void) => {
+  appState.listeners.add(listener)
+  return () => appState.listeners.delete(listener)
+}
+
+const getAuthSnapshot = () => appState.snapshot
+
+export const useSupabaseAuth = () => useSyncExternalStore(subscribeToAuth, getAuthSnapshot, getAuthSnapshot)
 
 // Types for database
 export interface UserProfile {
@@ -39,6 +72,16 @@ export interface Attachment {
   is_public: boolean
   created_at: string
   updated_at: string
+}
+
+export interface FileAttachment {
+  attachmentId: string
+  publicUrl: string
+  filename: string
+  originalName: string
+  fileSize: number
+  mimeType: string
+  fileType: Attachment["file_type"]
 }
 
 export interface Complaint {
@@ -111,6 +154,9 @@ export interface TaskProposal {
   quoted_price: number | null
   proposal_notes: string | null
   proposed_timeline: string | null
+  proposed_category: string | null
+  proposed_estimated_time: string | null
+  proposed_payment_terms: string | null
   attachments: Array<{id: string; name: string; size: number}> | null
   created_at: string
   updated_at: string
@@ -217,6 +263,7 @@ export interface TaskEvidenceSubmission {
   provider_id: string
   evidence_type: 'photo' | 'video' | 'document' | 'signature'
   attachment_id: string
+  attachments?: Pick<Attachment, "b2_url" | "file_type" | "original_name" | "file_size"> | null
   description: string | null
   submitted_at: string
   approved_at: string | null

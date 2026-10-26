@@ -5,6 +5,7 @@ import { BillingTab } from "./components/BillingTab";
 import { supabase } from "../lib/supabase";
 import { useToast } from "../hooks/use-toast";
 import { useHotelTenant } from "../lib/hotelTenant";
+import { taxEntityTypes } from "../lib/booksTaxSummary";
 import { fetchCurrentHotelRewards, updateCurrentHotelRewardsEnrollment, useRewardsPoints, type HotelRewardsSummary } from "../lib/rewardsPointsContext";
 import {
   Card,
@@ -150,6 +151,7 @@ const ServicesProfilePage = () => {
   const [userData, setUserData] = useState({
     organizationName: "",
     hotelStarRating: "",
+    taxEntityType: "",
     firstName: "",
     lastName: "",
     email: "",
@@ -187,7 +189,8 @@ const ServicesProfilePage = () => {
         const dbFieldName = fieldName === 'firstName' ? 'first_name' :
                            fieldName === 'lastName' ? 'last_name' :
                            fieldName === 'organizationName' ? 'organization_name' :
-                           fieldName === 'hotelStarRating' ? 'hotel_star_rating' : fieldName;
+                           fieldName === 'hotelStarRating' ? 'hotel_star_rating' :
+                           fieldName === 'taxEntityType' ? 'tax_entity_type' : fieldName;
 
         const { error } = await supabase
           .from("user_profiles")
@@ -234,6 +237,7 @@ const ServicesProfilePage = () => {
               user_id: user.id,
               organization_name: metadata.organization_name || null,
               hotel_star_rating: metadata.hotel_star_rating ? Number(metadata.hotel_star_rating) : null,
+              tax_entity_type: metadata.tax_entity_type || null,
               email: user.email || "",
               first_name: metadata.first_name || "",
               last_name: metadata.last_name || "",
@@ -266,6 +270,7 @@ const ServicesProfilePage = () => {
           ...prev,
           organizationName: resolvedProfile?.organization_name || metadata.organization_name || "",
           hotelStarRating: resolvedProfile?.hotel_star_rating ? String(resolvedProfile.hotel_star_rating) : "",
+          taxEntityType: resolvedProfile?.tax_entity_type || metadata.tax_entity_type || "",
           firstName: resolvedProfile?.first_name || metadata.first_name || "",
           lastName: resolvedProfile?.last_name || metadata.last_name || "",
           email: user.email || "",
@@ -1335,6 +1340,25 @@ const ServicesProfilePage = () => {
                           </SelectContent>
                         </Select>
                         <p className="text-xs text-muted-foreground">This classification determines the Local Hotel Tax charged on guest room bookings.</p>
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="taxEntityType">Organization tax entity type</Label>
+                        <Select
+                          value={userData.taxEntityType || "unconfigured"}
+                          onValueChange={(value) => {
+                            const entityType = value === "unconfigured" ? "" : value;
+                            setUserData({ ...userData, taxEntityType: entityType });
+                            saveFieldToDatabase("taxEntityType", entityType || null);
+                          }}
+                          disabled={!isEditing}
+                        >
+                          <SelectTrigger id="taxEntityType"><SelectValue placeholder="Select entity type" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unconfigured">Select later</SelectItem>
+                            {taxEntityTypes.map((entityType) => <SelectItem key={entityType.value} value={entityType.value}>{entityType.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">This helps Books show the right income-tax setup. Confirm your tax treatment with the relevant tax authority or adviser.</p>
                       </div>
                     </>
                   )}

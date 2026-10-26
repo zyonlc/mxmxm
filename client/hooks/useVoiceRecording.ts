@@ -59,7 +59,7 @@ export function useVoiceRecording() {
       mediaRecorder.onerror = (event) => {
         setState(prev => ({
           ...prev,
-          error: `Recording error: ${event.error}`,
+          error: "Recording failed. Please try again.",
           isRecording: false,
         }));
         stopRecording();
