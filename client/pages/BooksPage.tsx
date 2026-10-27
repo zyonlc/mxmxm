@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { Badge } from "../components/ui/badge";
@@ -29,7 +29,7 @@ type Invoice = { id: string; invoice_number: string; contact_id: string | null; 
 type TaxTreatment = "deductible" | "non_deductible" | "review";
 type Expense = { id: string; description: string; contact_id: string | null; expense_date: string; currency_code: string; amount: number; tax_amount: number; payment_status: "paid" | "unpaid" | "refunded"; purchase_source_type: string | null; tax_treatment: TaxTreatment };
 type Account = { id: string; code: string; name: string; type: "asset" | "liability" | "equity" | "income" | "expense" };
-type TaxRate = { id: string; name: string; country_code: string; rate_percentage: number; effective_from: string; effective_to: string | null; is_active: boolean; confirmed_at: string | null };
+type TaxRate = { id: string; name: string; country_code: string; rate_percentage: number; effective_from: string; effective_to: string | null; is_active: boolean; confirmed_at: string | null; tax_scope: "invoice" | "other" };
 type OrganizationTaxProfile = { country_code: string; tax_entity_type: TaxEntityType | null };
 type LedgerLine = { account_id: string; debit: number; credit: number; currency_code: string; transaction_date: string };
 type LoyaltyPosting = { ledger_entry_id: string; amount_ugx: number; status: "pending" | "posted" | "failed"; journal_transaction_id: string | null; error_message: string | null; created_at: string };
@@ -73,6 +73,7 @@ const BooksPage = () => {
   const requestedOrganizationId = searchParams.get("organization");
   const isPersonalWorkspace = searchParams.get("workspace") === "personal" || requestedOrganizationId === "personal";
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const initializedTaxSettingsFor = useRef<string | null>(null);
   const [baseCurrency, setBaseCurrency] = useState("UGX");
   const requestedCurrency = searchParams.get("currency");
   const viewMode = searchParams.get("view");
@@ -155,7 +156,7 @@ const BooksPage = () => {
         supabase.from("books_invoices").select("id,invoice_number,contact_id,issue_date,due_date,currency_code,subtotal,tax_amount,total_due,status").eq("organization_id", orgId).order("issue_date", { ascending: false }),
         supabase.from("books_expenses").select("id,description,contact_id,expense_date,currency_code,amount,tax_amount,payment_status,purchase_source_type,tax_treatment").eq("organization_id", orgId).order("expense_date", { ascending: false }),
         supabase.from("books_accounts").select("id,code,name,type").eq("organization_id", orgId).order("code"),
-        supabase.from("books_tax_rates").select("id,name,country_code,rate_percentage,effective_from,effective_to,is_active,confirmed_at").eq("organization_id", orgId).eq("is_active", true).order("effective_from", { ascending: false }),
+        supabase.from("books_tax_rates").select("id,name,country_code,rate_percentage,effective_from,effective_to,is_active,confirmed_at,tax_scope").eq("organization_id", orgId).eq("is_active", true).order("effective_from", { ascending: false }),
         supabase.from("books_income_tax_rates").select("country_code,tax_entity_type,name,rate_method,rate_schedule,effective_from,effective_to,confirmed_at").eq("organization_id", orgId).order("effective_from", { ascending: false }),
         supabase.from("books_journal_transactions").select("id,transaction_date,books_journal_lines(account_id,debit,credit,currency_code)").eq("organization_id", orgId).order("transaction_date", { ascending: false }),
         supabase.from("hotel_loyalty_books_postings").select("ledger_entry_id,amount_ugx,status,journal_transaction_id,error_message,created_at").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(20),
@@ -171,8 +172,11 @@ const BooksPage = () => {
       const nextTaxProfile = { country_code: org.data?.tax_country_code?.trim() || "UG", tax_entity_type: org.data?.tax_entity_type || null } as OrganizationTaxProfile;
       setOrganizationTaxProfile(nextTaxProfile);
       setTaxProfileForm(nextTaxProfile);
-      setIncomeTaxForm((form) => ({ ...form, name: nextTaxProfile.country_code === "UG" && nextTaxProfile.tax_entity_type === "company" ? "URA Corporation Tax" : "Confirmed business income-tax schedule", rateMethod: nextTaxProfile.tax_entity_type === "company" ? "flat" : "progressive", rate: nextTaxProfile.country_code === "UG" && nextTaxProfile.tax_entity_type === "company" ? "30" : "" }));
-      if (nextTaxProfile.tax_entity_type !== "company") setIncomeTaxBrackets([{ lowerBound: "0", upperBound: "", rate: "", baseTax: "0" }]);
+      if (initializedTaxSettingsFor.current !== orgId) {
+        setIncomeTaxForm((form) => ({ ...form, name: nextTaxProfile.country_code === "UG" && nextTaxProfile.tax_entity_type === "company" ? "URA Corporation Tax" : "Confirmed business income-tax schedule", rateMethod: nextTaxProfile.tax_entity_type === "company" ? "flat" : "progressive", rate: nextTaxProfile.country_code === "UG" && nextTaxProfile.tax_entity_type === "company" ? "30" : "" }));
+        if (nextTaxProfile.tax_entity_type !== "company") setIncomeTaxBrackets([{ lowerBound: "0", upperBound: "", rate: "", baseTax: "0" }]);
+        initializedTaxSettingsFor.current = orgId;
+      }
       setContacts((contactResult.data || []) as Contact[]);
       setInvoices((invoiceResult.data || []) as Invoice[]);
       setExpenses((expenseResult.data || []) as Expense[]);
@@ -230,7 +234,7 @@ const BooksPage = () => {
     : taxSummary.expensesToReview > 0
       ? { status: "review_required" as const, estimatedTax: null, scheduleName: null }
       : estimateIncomeTax(rawTaxableIncome, organizationTaxProfile.country_code, organizationTaxProfile.tax_entity_type, taxPeriodEnd, incomeTaxSchedules);
-  const effectiveInvoiceTaxRates = taxRates.filter((rate) => rate.country_code.trim() === taxProfileForm.country_code && rate.confirmed_at && rate.effective_from <= invoiceForm.issue_date && (!rate.effective_to || rate.effective_to >= invoiceForm.issue_date));
+  const effectiveInvoiceTaxRates = taxRates.filter((rate) => rate.tax_scope === "invoice" && rate.country_code.trim() === organizationTaxProfile.country_code && rate.confirmed_at && rate.effective_from <= invoiceForm.issue_date && (!rate.effective_to || rate.effective_to >= invoiceForm.issue_date));
   const defaultInvoiceTaxRate = [...effectiveInvoiceTaxRates].sort((left, right) => right.effective_from.localeCompare(left.effective_from))[0];
   const hasValidTaxPeriod = taxPeriodStart <= taxPeriodEnd;
   const isTaxProfileSaved = organizationTaxProfile.country_code === taxProfileForm.country_code && organizationTaxProfile.tax_entity_type === taxProfileForm.tax_entity_type;
@@ -296,6 +300,10 @@ const BooksPage = () => {
     setSaving(true);
     try {
       const selectedRate = invoiceForm.tax_rate_id === "none" ? undefined : effectiveInvoiceTaxRates.find((rate) => rate.id === invoiceForm.tax_rate_id) || (!invoiceForm.tax_rate_id ? defaultInvoiceTaxRate : undefined);
+      if (invoiceForm.tax_rate_id !== "none" && !selectedRate) {
+        toast({ title: "No confirmed tax rate applies", description: "Confirm a rate for this invoice date, or select No tax only when the supply is not taxable.", variant: "destructive" });
+        return;
+      }
       const invoiceNumber = invoiceForm.invoice_number.trim();
       const subtotal = Number(invoiceForm.subtotal);
       const { data: invoice, error } = await supabase.from("books_invoices").insert({ organization_id: organizationId, invoice_number: invoiceNumber, contact_id: invoiceForm.contact_id || null, issue_date: invoiceForm.issue_date, due_date: invoiceForm.due_date, currency_code: currency, subtotal, tax_rate_id: selectedRate?.id || null, tax_rate_percentage: selectedRate?.rate_percentage || 0, status: "draft" }).select("id").single();
@@ -400,6 +408,10 @@ const BooksPage = () => {
 
   const saveIncomeTaxSchedule = async () => {
     if (!organizationId || !organizationTaxProfile.tax_entity_type) return;
+    if (incomeTaxForm.rateMethod === "flat" && (incomeTaxForm.rate === "" || Number(incomeTaxForm.rate) < 0 || Number(incomeTaxForm.rate) > 100)) {
+      toast({ title: "Enter a valid flat tax rate", description: "The rate must be between 0% and 100%.", variant: "destructive" });
+      return;
+    }
     if (incomeTaxForm.rateMethod === "progressive" && incomeTaxBrackets.some((bracket, index) => !bracket.lowerBound || !bracket.rate || bracket.baseTax === "" || (index < incomeTaxBrackets.length - 1 && !bracket.upperBound) || (index === incomeTaxBrackets.length - 1 && bracket.upperBound))) {
       toast({ title: "Complete the progressive tax brackets", description: "Each bracket needs thresholds and a rate; only the final bracket can have no upper limit.", variant: "destructive" });
       return;

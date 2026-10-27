@@ -6,7 +6,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { taxEntityTypes, type IncomeTaxSchedule, type TaxEntityType } from "../lib/booksTaxSummary";
 
-type TaxRate = { id: string; name: string; country_code: string; rate_percentage: number; effective_from: string; effective_to: string | null; is_active: boolean; confirmed_at: string | null };
+type TaxRate = { id: string; name: string; country_code: string; rate_percentage: number; effective_from: string; effective_to: string | null; is_active: boolean; confirmed_at: string | null; tax_scope: "invoice" | "other" };
 type TaxProfile = { country_code: string; tax_entity_type: TaxEntityType | null };
 type BracketForm = { lowerBound: string; upperBound: string; rate: string; baseTax: string };
 
@@ -105,7 +105,7 @@ const BooksTaxSettings = ({
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full min-w-[650px]">
             <thead><tr className="border-b bg-muted/30"><th className="p-3 text-left">Rate</th><th className="p-3 text-left">Country</th><th className="p-3 text-left">Effective period</th><th className="p-3 text-left">Status</th></tr></thead>
-            <tbody>{taxRates.map((rate) => <tr key={rate.id} className="border-b"><td className="p-3">{rate.name} · {rate.rate_percentage}%</td><td className="p-3">{rate.country_code}</td><td className="p-3">{rate.effective_from} – {rate.effective_to || "ongoing"}</td><td className="p-3">{rate.confirmed_at ? <Badge>Confirmed</Badge> : rate.effective_from <= today && (!rate.effective_to || rate.effective_to >= today) ? <Button type="button" size="sm" variant="outline" onClick={() => void confirmVatRate(rate.id)}>Confirm rate</Button> : <Badge variant="outline">Historical / future</Badge>}</td></tr>)}</tbody>
+            <tbody>{taxRates.filter((rate) => rate.tax_scope === "invoice").map((rate) => <tr key={rate.id} className="border-b"><td className="p-3">{rate.name} · {rate.rate_percentage}%</td><td className="p-3">{rate.country_code}</td><td className="p-3">{rate.effective_from} – {rate.effective_to || "ongoing"}</td><td className="p-3">{rate.confirmed_at ? <Badge>Confirmed</Badge> : rate.effective_from <= today && (!rate.effective_to || rate.effective_to >= today) ? <Button type="button" size="sm" variant="outline" onClick={() => void confirmVatRate(rate.id)}>Confirm rate</Button> : <Badge variant="outline">Historical / future</Badge>}</td></tr>)}</tbody>
           </table>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -114,7 +114,7 @@ const BooksTaxSettings = ({
           <TaxField label="Effective from"><Input type="date" value={vatRateForm.effectiveFrom} onChange={(event) => setVatRateForm({ ...vatRateForm, effectiveFrom: event.target.value })} /></TaxField>
           <div className="flex items-end"><Button type="button" onClick={() => void saveVatRate()} disabled={!isTaxProfileSaved || !vatRateForm.name.trim() || !vatRateForm.rate || !vatRateForm.effectiveFrom}>Save and confirm VAT rate</Button></div>
         </div>
-        <p className="text-xs text-muted-foreground">The seeded Uganda VAT 18% is a suggested standard-rate default; confirm whether it applies to your supply. A new rate closes the prior effective period without rewriting existing invoice records.</p>
+        <p className="text-xs text-muted-foreground">The Uganda VAT 18% entry is an unconfirmed suggestion. Confirm applicability before use. A saved rate closes the prior invoice-tax period without changing invoice snapshots or other tax categories.</p>
       </CardContent>
     </Card>
 
@@ -142,7 +142,7 @@ const BooksTaxSettings = ({
           <Button type="button" variant="outline" onClick={() => setIncomeTaxBrackets((rows) => [...rows, { lowerBound: rows.at(-1)?.upperBound || "0", upperBound: "", rate: "", baseTax: "0" }])}>Add bracket</Button>
         </div>}
         <div>
-          <Button type="button" onClick={() => void saveIncomeTaxSchedule()} disabled={!isTaxProfileSaved || !taxProfileForm.tax_entity_type || !incomeTaxForm.name.trim() || !incomeTaxForm.effectiveFrom}>Confirm and save income-tax schedule</Button>
+          <Button type="button" onClick={() => void saveIncomeTaxSchedule()} disabled={!isTaxProfileSaved || !taxProfileForm.tax_entity_type || !incomeTaxForm.name.trim() || !incomeTaxForm.effectiveFrom || (incomeTaxForm.rateMethod === "flat" && (incomeTaxForm.rate === "" || Number(incomeTaxForm.rate) < 0 || Number(incomeTaxForm.rate) > 100))}>Confirm and save income-tax schedule</Button>
           {taxProfileForm.tax_entity_type === "company" && <p className="mt-2 text-xs text-muted-foreground">Suggested Uganda company rate: 30% of chargeable income, subject to confirmation and any special regime or relief.</p>}
         </div>
         {incomeTaxSchedules.filter((schedule) => schedule.country_code.trim() === taxProfileForm.country_code && schedule.tax_entity_type === taxProfileForm.tax_entity_type).map((schedule) => <p key={`${schedule.tax_entity_type}-${schedule.effective_from}`} className="text-sm">{schedule.name} · {schedule.effective_from} – {schedule.effective_to || "ongoing"} · {schedule.confirmed_at ? "Confirmed" : "Unconfirmed"}</p>)}
